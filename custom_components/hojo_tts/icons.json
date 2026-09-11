@@ -1,0 +1,17 @@
+{
+  "entity": {
+    "tts": {
+      "hojo_tts": {
+        "default": "mdi:account-voice"
+      }
+    },
+    "sensor": {
+      "streamed": {
+        "default": "mdi:broadcast",
+        "state": {
+          "buffered": "mdi:tray-full"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,87 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Hojo TTS",
+        "description": "Enter the address of the Hojo TTS app and its API key. The key is shown in the app's Configuration tab.",
+        "data": {
+          "host": "Server address",
+          "api_key": "API key"
+        },
+        "data_description": {
+          "host": "For example http://homeassistant.local:8771",
+          "api_key": "The app generates one on first start."
+        }
+      },
+      "hassio_confirm": {
+        "title": "Add Hojo TTS",
+        "description": "Set up the {addon} app so its voices appear in your Assist pipelines?"
+      },
+      "reauth_confirm": {
+        "title": "Re-enter the API key",
+        "description": "The stored key was rejected. Paste the current one from the app's Configuration tab.",
+        "data": {
+          "api_key": "API key"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach the server. Check that the app is running and the address is right.",
+      "invalid_api_key": "The server rejected that API key."
+    },
+    "abort": {
+      "already_configured": "This server is already set up."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Hojo TTS options",
+        "description": "Pick the models that speak a reply sentence by sentence, so the first sentence plays while the rest is still being written. It suits a model that synthesises faster than its audio plays; a slower model will stall mid-reply. Leave a model unticked if a media player will not play the stream.",
+        "data": {
+          "stream_models": "Stream speech sentence by sentence"
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "cannot_connect": {
+      "message": "Could not reach the Hojo TTS server: {error}"
+    },
+    "invalid_api_key": {
+      "message": "The Hojo TTS server rejected the stored API key."
+    },
+    "list_models_failed": {
+      "message": "Could not read the model list from the Hojo TTS server: {error}"
+    },
+    "synthesis_failed": {
+      "message": "Hojo TTS could not speak that message: {error}"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "inference_ms": {
+        "name": "Last synthesis time"
+      },
+      "first_audio_ms": {
+        "name": "Time to first audio"
+      },
+      "rtf": {
+        "name": "Real-time factor"
+      },
+      "audio_seconds": {
+        "name": "Last audio length"
+      },
+      "characters": {
+        "name": "Last text length"
+      },
+      "streamed": {
+        "name": "Last synthesis mode",
+        "state": {
+          "streamed": "Streamed",
+          "buffered": "Buffered"
+        }
+      }
+    }
+  }
+}
