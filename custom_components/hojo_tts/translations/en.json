@@ -9,7 +9,7 @@
           "api_key": "API key"
         },
         "data_description": {
-          "host": "For example http://homeassistant.local:8771",
+          "host": "Starts with http:// — for example homeassistant.local:8771",
           "api_key": "The app generates one on first start."
         }
       },
