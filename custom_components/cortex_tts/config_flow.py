@@ -126,7 +126,11 @@ class CortexTTSConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
                 )
 
         return self.async_show_form(
-            step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
+            step_id="user",
+            data_schema=STEP_USER_DATA_SCHEMA,
+            errors=errors,
+            # hassfest forbids a URL inside a translated string.
+            description_placeholders={"example": "http://homeassistant.local:8771"},
         )
 
     async def async_step_hassio(
