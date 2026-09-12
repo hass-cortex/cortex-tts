@@ -1,0 +1,118 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Cortex TTS",
+        "description": "Enter the address of the Cortex TTS app and its API key. The key is shown in the app's Configuration tab.",
+        "data": {
+          "host": "Server address",
+          "api_key": "API key"
+        },
+        "data_description": {
+          "host": "Starts with http:// — for example homeassistant.local:8771",
+          "api_key": "The app generates one on first start."
+        }
+      },
+      "hassio_confirm": {
+        "title": "Add Cortex TTS",
+        "description": "Set up the {addon} app so its voices appear in your Assist pipelines?"
+      },
+      "reauth_confirm": {
+        "title": "Re-enter the API key",
+        "description": "The stored key was rejected. Paste the current one from the app's Configuration tab.",
+        "data": {
+          "api_key": "API key"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach the server. Check that the app is running and the address is right.",
+      "invalid_api_key": "The server rejected that API key."
+    },
+    "abort": {
+      "already_configured": "This server is already set up."
+    }
+  },
+  "exceptions": {
+    "cannot_connect": {
+      "message": "Could not reach the Cortex TTS server: {error}"
+    },
+    "invalid_api_key": {
+      "message": "The Cortex TTS server rejected the stored API key."
+    },
+    "list_models_failed": {
+      "message": "Could not read the model list from the Cortex TTS server: {error}"
+    },
+    "synthesis_failed": {
+      "message": "Cortex TTS could not speak that message: {error}"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "inference_ms": {
+        "name": "Last synthesis time"
+      },
+      "first_audio_ms": {
+        "name": "Time to first audio"
+      },
+      "rtf": {
+        "name": "Real-time factor"
+      },
+      "audio_seconds": {
+        "name": "Last audio length"
+      },
+      "characters": {
+        "name": "Last text length"
+      },
+      "mode": {
+        "name": "Last synthesis mode",
+        "state": {
+          "buffered": "Buffered",
+          "sentence": "Sentence by sentence",
+          "coalesced": "Coalesced"
+        }
+      },
+      "margin_seconds": {
+        "name": "Playback margin"
+      },
+      "longest_gap_ms": {
+        "name": "Longest delivery gap"
+      }
+    }
+  },
+  "config_subentries": {
+    "model": {
+      "step": {
+        "reconfigure": {
+          "title": "{model}",
+          "description": "How this model should speak a reply that is still being written.",
+          "data": {
+            "stream_mode": "Speaking mode",
+            "head_start": "Head start"
+          },
+          "data_description": {
+            "stream_mode": "Buffered renders the whole reply before any of it plays — the longest wait, but it never stalls. Sentence sends each finished sentence on its own. Coalesced does the same but sends together whatever arrived while the previous sentence was still being spoken, which removes the pause at each sentence boundary.",
+            "head_start": "Seconds of audio to bank before a streamed reply starts playing. A model that renders slower than its audio plays falls behind for the whole reply and never catches up, and this is the difference handed over in advance. Leave at 0 for a model that keeps ahead. The cost is paid on time to first audio, and only up to what the reply can actually lose: a one-line answer waits a fraction of it."
+          }
+        }
+      },
+      "abort": {
+        "model_comes_from_the_server": "Models are not added here. Download one in the Cortex TTS app and it appears on this page by itself.",
+        "reconfigure_successful": "Saved. It applies to the next reply."
+      },
+      "entry_type": "model",
+      "initiate_flow": {
+        "user": "Add a model"
+      }
+    }
+  },
+  "selector": {
+    "stream_mode": {
+      "options": {
+        "buffered": "Buffered — render it all, then play",
+        "sentence": "Sentence by sentence",
+        "coalesced": "Sentence by sentence, coalesced"
+      }
+    }
+  }
+}

@@ -1,0 +1,284 @@
+"""Config flow for the Cortex TTS integration."""
+
+from __future__ import annotations
+
+import contextlib
+import hashlib
+import logging
+from typing import Any
+
+import aiohttp
+import voluptuous as vol
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    ConfigSubentryFlow,
+    SubentryFlowResult,
+)
+from homeassistant.core import callback
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.selector import (
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
+    SelectOptionDict,
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
+)
+from homeassistant.helpers.service_info.hassio import HassioServiceInfo
+
+from .client import CortexTTSClient
+from .const import (
+    CONF_API_KEY,
+    CONF_HEAD_START,
+    CONF_HOST,
+    CONF_STREAM_MODE,
+    DEFAULT_HEAD_START,
+    DOMAIN,
+    MAX_HEAD_START,
+    STREAM_MODES,
+    SUBENTRY_TYPE,
+)
+from .models import default_stream_mode
+
+_LOGGER = logging.getLogger(__name__)
+
+STEP_USER_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_HOST): str,
+        vol.Required(CONF_API_KEY): str,
+    }
+)
+
+STEP_REAUTH_SCHEMA = vol.Schema({vol.Required(CONF_API_KEY): str})
+
+
+class CortexTTSConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
+    """Handle a config flow for Cortex TTS."""
+
+    VERSION = 1
+
+    _hassio_discovery: HassioServiceInfo | None = None
+
+    @classmethod
+    @callback
+    def async_get_supported_subentry_types(
+        cls, config_entry: ConfigEntry
+    ) -> dict[str, type[ConfigSubentryFlow]]:
+        """Every downloaded model is a subentry with its own settings.
+
+        There are no entry-level options left: everything configurable here is
+        a property of one model, and a setting that applies to all of them was
+        only ever a list of per-model answers wearing a single form.
+        """
+        return {SUBENTRY_TYPE: ModelSubentryFlow}
+
+    async def _validate_input(
+        self, host: str, api_key: str
+    ) -> tuple[str | None, CortexTTSClient]:
+        """Validate host and API key, returning (error_key, client)."""
+        session = async_get_clientsession(self.hass)
+        client = CortexTTSClient(host=host, api_key=api_key, session=session)
+        return await client.validate(), client
+
+    async def _titled(self, client: CortexTTSClient, base: str) -> str:
+        """Append the server version to a title when it can be read."""
+        with contextlib.suppress(
+            aiohttp.ClientError, TimeoutError, KeyError, ValueError
+        ):
+            health = await client.health()
+            if version := health.get("version"):
+                return f"{base} ({version})"
+        return base
+
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle manual setup."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            error, client = await self._validate_input(
+                user_input[CONF_HOST], user_input[CONF_API_KEY]
+            )
+            if error:
+                errors["base"] = error
+            else:
+                unique_id = hashlib.sha256(user_input[CONF_HOST].encode()).hexdigest()[
+                    :16
+                ]
+                await self.async_set_unique_id(unique_id)
+                self._abort_if_unique_id_configured()
+                title = await self._titled(client, "Cortex TTS")
+                return self.async_create_entry(title=title, data=user_input)
+
+        return self.async_show_form(
+            step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
+        )
+
+    async def async_step_hassio(
+        self, discovery_info: HassioServiceInfo
+    ) -> ConfigFlowResult:
+        """Handle Supervisor discovery.
+
+        The addon publishes ``{host, port, api_key}``. A fresh payload with a
+        rotated key updates the stored credentials in place, so rotating the
+        key in the addon's options never means a manual reauth.
+        """
+        _LOGGER.debug("Supervisor discovery: %s", discovery_info)
+
+        host = f"http://{discovery_info.config['host']}:{discovery_info.config['port']}"
+        api_key = discovery_info.config["api_key"]
+
+        # Adopt a matching hand-added entry: its unique id is a hash of the
+        # host, not the Supervisor uuid, so the fast path below would miss it.
+        #
+        # The Supervisor replays its discovery records on every Home Assistant
+        # start, and this branch matches on the host, which never changes — so
+        # it is reached long after there is anything left to adopt. Reloading
+        # unconditionally (the default) therefore tore the entry down and set
+        # it up again on every restart. Rotating the key still reloads: the
+        # stored data really does change then.
+        for entry in self._async_current_entries(include_ignore=False):
+            if entry.data.get(CONF_HOST) == host:
+                return self.async_update_reload_and_abort(
+                    entry,
+                    data_updates={CONF_HOST: host, CONF_API_KEY: api_key},
+                    unique_id=discovery_info.uuid,
+                    reason="already_configured",
+                    reload_even_if_entry_is_unchanged=False,
+                )
+
+        await self.async_set_unique_id(discovery_info.uuid)
+        self._abort_if_unique_id_configured(
+            updates={CONF_HOST: host, CONF_API_KEY: api_key}
+        )
+
+        self._hassio_discovery = discovery_info
+        self.context.update(
+            {
+                "title_placeholders": {"name": discovery_info.name},
+                "configuration_url": (
+                    f"homeassistant://hassio/addon/{discovery_info.slug}/info"
+                ),
+            }
+        )
+        return await self.async_step_hassio_confirm()
+
+    async def async_step_hassio_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Confirm Supervisor discovery and create the entry."""
+        assert self._hassio_discovery is not None
+        discovery = self._hassio_discovery
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            host = f"http://{discovery.config['host']}:{discovery.config['port']}"
+            api_key = discovery.config["api_key"]
+            error, client = await self._validate_input(host, api_key)
+            if error:
+                errors["base"] = error
+            else:
+                title = await self._titled(client, discovery.name)
+                return self.async_create_entry(
+                    title=title, data={CONF_HOST: host, CONF_API_KEY: api_key}
+                )
+
+        return self.async_show_form(
+            step_id="hassio_confirm",
+            description_placeholders={"addon": discovery.name},
+            errors=errors,
+        )
+
+    async def async_step_reauth(self, entry_data: dict[str, Any]) -> ConfigFlowResult:
+        """Start reauth when the stored key stops working."""
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Collect a replacement API key."""
+        errors: dict[str, str] = {}
+        reauth_entry = self._get_reauth_entry()
+
+        if user_input is not None:
+            error, _ = await self._validate_input(
+                reauth_entry.data[CONF_HOST], user_input[CONF_API_KEY]
+            )
+            if error:
+                errors["base"] = error
+            else:
+                return self.async_update_reload_and_abort(
+                    reauth_entry,
+                    data_updates={CONF_API_KEY: user_input[CONF_API_KEY]},
+                )
+
+        return self.async_show_form(
+            step_id="reauth_confirm", data_schema=STEP_REAUTH_SCHEMA, errors=errors
+        )
+
+
+class ModelSubentryFlow(ConfigSubentryFlow):
+    """One model's own settings.
+
+    A subentry here stands for a model the server has already downloaded, so
+    there is nothing to add — `async_step_user` exists only to say so, because
+    Home Assistant offers the button whatever the integration intends.
+    """
+
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        """Refuse: a model appears by being downloaded in the app."""
+        return self.async_abort(reason="model_comes_from_the_server")
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        """Edit how this model speaks."""
+        entry = self._get_entry()
+        subentry = self._get_reconfigure_subentry()
+        if user_input is not None:
+            return self.async_update_and_abort(entry, subentry, data_updates=user_input)
+
+        model = next(
+            (m for m in entry.runtime_data.models if m.id == subentry.unique_id), None
+        )
+        schema = vol.Schema(
+            {
+                vol.Required(
+                    CONF_STREAM_MODE,
+                    default=subentry.data.get(CONF_STREAM_MODE)
+                    or default_stream_mode(model),
+                ): SelectSelector(
+                    SelectSelectorConfig(
+                        options=[
+                            SelectOptionDict(value=mode, label=mode)
+                            for mode in STREAM_MODES
+                        ],
+                        translation_key=CONF_STREAM_MODE,
+                        mode=SelectSelectorMode.LIST,
+                    )
+                ),
+                vol.Required(
+                    CONF_HEAD_START,
+                    default=subentry.data.get(CONF_HEAD_START, DEFAULT_HEAD_START),
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=0,
+                        max=MAX_HEAD_START,
+                        step=0.1,
+                        unit_of_measurement="s",
+                        mode=NumberSelectorMode.BOX,
+                    )
+                ),
+            }
+        )
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=schema,
+            description_placeholders={"model": subentry.title},
+        )
