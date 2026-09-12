@@ -60,8 +60,10 @@ ASSUMED_DEFICIT = 0.10
 # A valley with a cliff on either side. This sits in the flat part of it.
 #
 # It is a limit on the request, not on the batching: a single sentence over it
-# is split at a clause mark rather than sent whole, because a run-on sentence
-# is delivered in one lump and the listener waits out the whole of it.
+# is split at a clause mark rather than sent whole. That costs something on
+# every model and for a different reason on each — a run-on lands on the right
+# cliff above whatever emits audio as it renders, and arrives as one lump on
+# whatever does not.
 MAX_REQUEST_SECONDS = 14.0
 
 # One subentry per downloaded model, so each model's options have somewhere to
