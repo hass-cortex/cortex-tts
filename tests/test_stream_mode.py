@@ -17,7 +17,6 @@ from homeassistant.config_entries import ConfigSubentry
 from custom_components.cortex_tts.const import (
     CONF_STREAM_MODE,
     STREAM_BUFFERED,
-    STREAM_COALESCED,
     STREAM_MODES,
     STREAM_SENTENCE,
     SUBENTRY_TYPE,
@@ -63,26 +62,35 @@ def _subentry(model_id: str, **data: Any) -> ConfigSubentry:
 
 
 class TestDefault:
-    def test_a_model_that_keeps_up_coalesces(self) -> None:
-        """Not plain sentence streaming: it costs a prefill per sentence and
-        buys nothing a coalesced stream does not already give."""
-        assert default_stream_mode(_model(rtf_hint=0.21)) == STREAM_COALESCED
+    """Buffered, whatever the catalog claims about the model.
 
-    def test_a_model_that_cannot_keep_up_is_not_streamed(self) -> None:
-        assert default_stream_mode(_model(rtf_hint=0.79)) == STREAM_BUFFERED
+    The default used to be derived from `rtf_hint`, a figure from one host
+    that does not predict another: a model that streamed comfortably where it
+    was measured could not keep up on a four-core HA VM, so the derivation
+    switched streaming on for models that stuttered.
+    """
 
-    def test_a_model_that_is_gone_falls_back_to_the_safe_one(self) -> None:
-        """The subentry can outlive the model list for an instant."""
-        assert default_stream_mode(None) == STREAM_BUFFERED
+    def test_it_is_buffered(self) -> None:
+        assert default_stream_mode() == STREAM_BUFFERED
+
+    def test_it_takes_no_model(self) -> None:
+        """The catalog figure is no longer an input, so there is nothing to pass.
+
+        It used to decide, and on a host slower than the one that measured it
+        that decision was wrong.
+        """
+        import inspect
+
+        assert not inspect.signature(default_stream_mode).parameters
 
 
 class TestResolution:
     def test_no_subentry_yet_means_the_default(self) -> None:
-        assert stream_mode(_Entry(), _model()) == default_stream_mode(_model())
+        assert stream_mode(_Entry(), _model()) == default_stream_mode()
 
     def test_an_empty_subentry_means_the_default(self) -> None:
         entry = _Entry(_subentry("moss-nano"))
-        assert stream_mode(entry, _model()) == default_stream_mode(_model())
+        assert stream_mode(entry, _model()) == default_stream_mode()
 
     @pytest.mark.parametrize("mode", STREAM_MODES)
     def test_a_saved_choice_wins(self, mode: str) -> None:

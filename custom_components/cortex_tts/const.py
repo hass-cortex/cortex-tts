@@ -77,9 +77,8 @@ together. Measured on MOSS-TTS-Nano: three sentences sent one at a time stalled
 one request never ran dry and reached first audio just as fast."""
 STREAM_MODES = (STREAM_BUFFERED, STREAM_SENTENCE, STREAM_COALESCED)
 
-# Compared against the catalog's `rtf_hint`, which is a relative cost figure
-# and not a promise: it separates the two ends of the catalog rather than
-# predicting any one host. Sets the default only; an explicit choice wins.
+# Published advice, not a rule: the measured RTF to be under before streaming
+# is worth enabling. Nothing branches on it.
 STREAM_RTF_CEILING = 0.5
 
 # Sensor keys a mid-stream push may write. These two are settled the moment the

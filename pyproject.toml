@@ -1,7 +1,7 @@
 [project]
 name = "cortex-tts"
 version = "0.1.0"
-description = "Home Assistant integration for the Cortex TTS on-device text-to-speech app"
+description = "Home Assistant TTS platform for the Cortex TTS app — one entity per model, live voice sync, per-model streaming"
 readme = "README.md"
 requires-python = ">=3.14"
 license = { text = "MIT" }

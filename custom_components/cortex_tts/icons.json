@@ -6,10 +6,12 @@
       }
     },
     "sensor": {
-      "streamed": {
+      "mode": {
         "default": "mdi:broadcast",
         "state": {
-          "buffered": "mdi:tray-full"
+          "buffered": "mdi:tray-full",
+          "sentence": "mdi:format-list-numbered",
+          "coalesced": "mdi:format-list-group"
         }
       }
     }

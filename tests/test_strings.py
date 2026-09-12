@@ -96,3 +96,20 @@ class TestSensorNames:
         """A renamed key leaves the old word behind, describing nothing."""
         described = {description.translation_key for description in DESCRIPTIONS}
         assert set(STRINGS["entity"]["sensor"]) == described
+
+
+def test_every_sensor_icon_names_a_sensor_that_exists() -> None:
+    """icons.json is keyed by translation key; a stale key is silently unused."""
+    import json
+    from pathlib import Path
+
+    base = Path(__file__).resolve().parent.parent / "custom_components/cortex_tts"
+    icons = json.loads((base / "icons.json").read_text())
+    strings = json.loads((base / "strings.json").read_text())
+    sensors = strings["entity"]["sensor"]
+    for key, icon in icons["entity"]["sensor"].items():
+        assert key in sensors, f"icons.json names sensor {key!r} which has no strings"
+        for state in icon.get("state", {}):
+            assert state in sensors[key].get("state", {}), (
+                f"icon state {state!r} is not a state of sensor {key!r}"
+            )

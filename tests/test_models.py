@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import pytest
-
-from custom_components.cortex_tts.const import STREAM_BUFFERED, STREAM_RTF_CEILING
+from custom_components.cortex_tts.const import STREAM_BUFFERED
 from custom_components.cortex_tts.models import ModelInfo, SpeechStats, VoiceInfo
 
 
@@ -23,30 +21,6 @@ def _model(**overrides: object) -> ModelInfo:
         "rtf_hint": 0.21,
     }
     return ModelInfo(**{**base, **overrides})  # type: ignore[arg-type]
-
-
-class TestOutrunsPlayback:
-    """What decides whether a model is streamed sentence by sentence."""
-
-    @pytest.mark.parametrize(
-        ("rtf_hint", "expected"),
-        [
-            (0.21, True),  # the shipped 40M
-            (0.79, False),  # the shipped 80M
-            (STREAM_RTF_CEILING, False),  # the ceiling itself is not under it
-            (0.0, False),  # unknown: never assume a model can keep up
-        ],
-    )
-    def test_only_a_known_rate_under_the_ceiling_streams(
-        self, rtf_hint: float, expected: bool
-    ) -> None:
-        assert _model(rtf_hint=rtf_hint).outruns_playback is expected
-
-    def test_the_ceiling_separates_the_two_shipped_models(self) -> None:
-        # The constant's whole job. If the catalog figures move, this is the
-        # test that says the default changed with them.
-        assert _model(rtf_hint=0.21).outruns_playback
-        assert not _model(rtf_hint=0.79).outruns_playback
 
 
 class TestSpeechStats:

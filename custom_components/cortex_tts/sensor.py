@@ -1,6 +1,6 @@
 """Diagnostic sensors: what the last synthesis cost and how it was delivered.
 
-Real-time factor is the number that matters on a CPU-only host — it says
+Real-time factor is the number that matters on a host without a GPU — it says
 whether the box can still speak faster than it plays, which is also what
 decides whether streaming is worth using. These are push sensors fed by the
 TTS entity, so they cost nothing when nothing is speaking.
@@ -135,9 +135,8 @@ DESCRIPTIONS: tuple[CortexSensorDescription, ...] = (
             None if stats.longest_gap_ms is None else round(stats.longest_gap_ms, 1)
         ),
     ),
-    # How this reply reached the speaker, not what the model is set to: a
-    # caller that hands over the whole message at once is spoken buffered
-    # whatever the subentry says.
+    # The mode the reply was spoken in, which is the subentry's setting at
+    # the moment it began — a message handed over whole goes through it too.
     CortexSensorDescription(
         key="mode",
         translation_key="mode",

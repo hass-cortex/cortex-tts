@@ -6,40 +6,64 @@
 [![GitHub License](https://img.shields.io/github/license/hass-cortex/cortex-tts)](https://github.com/hass-cortex/cortex-tts/blob/main/LICENSE)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/hass-cortex/cortex-tts)
 
-Home Assistant integration for the [Cortex TTS app](https://github.com/hass-cortex/app-cortex-tts) —
-on-device, CPU-only text-to-speech.
+Home Assistant integration for the [Cortex TTS app][app-repo] — on-device
+text-to-speech over three ONNX models, on your own hardware.
 
 Adds one TTS entity per model downloaded on the server — a model with no
 weights on disk would be a permanently-failing voice in the picker — so every
 voice the server offers can be selected in any Assist pipeline or `tts.speak`
 action.
 
+The models themselves — what each costs, how each clones, which to pick — are
+documented on the app's side: [Models][models]. This page is about the Home
+Assistant half: entities, `tts.speak`, the per-model speaking mode and the
+diagnostic sensors.
+
 ## Features
 
 - **On-device** — synthesis runs on your own hardware through the
-  [Cortex TTS app][app-repo]. No cloud, no API key, no per-character bill.
+  [Cortex TTS app][app-repo]. No cloud, no per-character bill.
 - **One entity per model** — each model downloaded on the server becomes its
   own TTS entity, with its built-in or cloned voices in the pipeline picker.
-- **Per-sentence playback** — a long reply starts speaking after its first
-  sentence instead of after its last.
-- **The text pipeline the model lacks** — Traditional-to-Simplified conversion
-  and number, unit, date and clock expansion, applied server-side before
-  synthesis.
+- **Streaming, per model, and off until you ask** — a model that renders
+  faster than its audio plays can start on the opening sentences instead of the
+  last one. Every model starts buffered; you turn streaming on after your own
+  sensors have said the model keeps up on your host.
+- **A service for voice ids** — `cortex_tts.list_voices` answers what
+  `tts.speak` needs, which Home Assistant otherwise publishes only to the
+  dashboard.
 - **Live voice sync** — downloading a model or uploading a reference recording
   reaches the entity list in seconds, with no reload.
-- **Discovered automatically** — the app announces itself through the
-  Supervisor, so the address and API key arrive without being typed.
-- **Diagnostics for what the listener waits** — six sensors per model, all
-  describing the most recent reply.
+- **Discovered automatically** on Home Assistant OS and Supervised — the app
+  announces itself through the Supervisor, so the address and API key arrive
+  without being typed.
+- **Diagnostics for what the listener waits** — sensors per model describing
+  the most recent reply, including the playback margin that says whether the
+  renderer beat the speaker or lost to it.
+
+## Requirements
+
+- **Home Assistant 2026.3.0 or newer.** 2026.3 is the release from which Home
+  Assistant serves an integration's own `brand/` icons, which is where this
+  one's live; it also brings the Python 3.14 the code is written for.
+- **Cortex TTS app 0.1.0 or newer**, which speaks API version 1. The
+  integration reads `api_version` from the app's `/health` and refuses to set
+  up with "unsupported API" when the two sides disagree — update whichever is
+  older.
 
 ## Setup
 
-### 1. Install the app
+### 1. Install the app and download a model
 
 The integration speaks through the [Cortex TTS app][app-repo]; install and start
-that first.
+that first, following its own [App Store page][app-docs].
 
 [![Open this app in your Home Assistant instance.](https://my.home-assistant.io/badges/supervisor_addon.svg)](https://my.home-assistant.io/redirect/supervisor_addon/?addon=24127962_cortex_tts&repository_url=https%3A%2F%2Fgithub.com%2Fhass-cortex%2Frepository)
+
+Then download at least one model in the app's UI. Setup succeeds with nothing
+downloaded, but it creates no entities — a model with no weights cannot speak,
+so it gets no voice in the picker. Models downloaded later appear by
+themselves.
 
 ### 2. Add this integration through HACS
 
@@ -49,14 +73,20 @@ Press **Add**, then restart Home Assistant.
 
 ### 3. Pair it with the running app
 
-A **Cortex TTS discovered** card appears by itself; click **Configure** and
-confirm — the address and API key come from the app, so there is nothing to
-type.
+On Home Assistant OS or Supervised, a **Cortex TTS discovered** card appears by
+itself; click **Configure** and confirm — the address and API key come from the
+app, so there is nothing to type. The app is reached over the Supervisor's
+internal network as `http://local-cortex-tts:8771`, which is why its port need
+not be published.
 
 [![Open your Home Assistant instance and start setting up this integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=cortex_tts)
 
-To add it by hand instead, use the app's address (`http://homeassistant.local:8771`)
-and the API key from the app's Configuration tab.
+Container and Core installs have no Supervisor to announce through, so add it
+by hand: the app's address **including the scheme**
+(`http://homeassistant.local:8771`) and the API key from the app's
+Configuration tab. The port is not published by default; for an address
+reachable from outside the Supervisor network, publish 8771 under the app's
+**Network** settings first.
 
 ### 4. Pick the voice in a pipeline
 
@@ -67,24 +97,32 @@ so a Chinese voice is the only thing that makes it read Chinese.
 
 ## Entities
 
-One **TTS entity** per downloaded model, plus six diagnostic sensors describing
-the reply it spoke most recently:
+One **TTS entity** per downloaded model, named after the model — with three
+models downloaded that is `tts.hojo_tts_light_40m`,
+`tts.hojo_tts_light_80m_voice_cloning` and `tts.moss_tts_nano` — plus eight
+diagnostic sensors describing the reply it spoke most recently:
 
-| Sensor                  | Unit | What it says                                               |
-| ----------------------- | ---- | ---------------------------------------------------------- |
-| **Time to first audio** | ms   | Request in, first frame out — the wait a listener feels    |
-| **Last synthesis time** | ms   | What the model cost, summed across sentences               |
-| **Last audio length**   | s    | How long the reply plays for                               |
-| **Real-time factor**    | —    | Synthesis time over audio length; below 1 outruns playback |
-| **Last text length**    | —    | Characters in the reply                                    |
-| **Last synthesis mode** | —    | `Streamed` or `Buffered`                                   |
+| Sensor                  | Entity id                             | Unit | What it says                                                                                                          |
+| ----------------------- | ------------------------------------- | ---- | --------------------------------------------------------------------------------------------------------------------- |
+| **Time to first audio** | `sensor.<model>_time_to_first_audio`  | ms   | Request in, first frame out — the wait a listener feels                                                               |
+| **Last synthesis time** | `sensor.<model>_last_synthesis_time`  | ms   | Buffered reply: what the model cost, as the server measured it. Streamed reply: wall-clock from request to last frame |
+| **Last audio length**   | `sensor.<model>_last_audio_length`    | s    | How long the reply plays for                                                                                          |
+| **Real-time factor**    | `sensor.<model>_real_time_factor`     | —    | Synthesis time over audio length; below 1 outruns playback                                                            |
+| **Last text length**    | `sensor.<model>_last_text_length`     | —    | Characters in the reply                                                                                               |
+| **Playback margin**     | `sensor.<model>_playback_margin`      | s    | The smallest lead the listener ever had; negative means the audio did not exist yet when it was due                   |
+| **Longest delivery gap**| `sensor.<model>_longest_delivery_gap` | ms   | The longest the stream sent nothing — what a player with a small buffer trips over                                    |
+| **Last synthesis mode** | `sensor.<model>_last_synthesis_mode`  | —    | `Buffered`, `Sentence by sentence` or `Coalesced`                                                                     |
+
+`<model>` is the slug of the model name, as in the TTS entity id. The margin
+and the gap are measured only on a streamed reply; a buffered one leaves them
+unknown.
 
 They are diagnostic and describe the last reply only, never a running total, so
 two replies are never mixed. All of them clear when a new reply begins: a
 failed synthesis leaves them unknown rather than zero, because zero would read
 as "instant".
 
-Sentence-by-sentence replies settle their numbers at two moments — the wait is
+A streamed reply settles its numbers at two moments — the wait and the mode are
 known when the first frame leaves, the totals only once the last sentence is
 rendered — so each lands as soon as it becomes true.
 
@@ -105,97 +143,167 @@ data:
   message: 洗衣機洗好了，目前室內溫度 26.5°C。
 ```
 
-`language` takes `zh`, `zh-TW`, `zh-CN`, `zh-HK`, `zh-Hant`, `zh-Hans`, `en`,
-`en-US`, `en-GB` or `en-AU`. The default is the first of `zh-TW`, `zh`,
-`en-US`, `en` the model actually supports, so both shipped models default to
-`zh-TW`. It decides which voices are on offer, and it sets the default for
-`convert_script` — number expansion stays on either way.
+`language` decides which voices are on offer and sets the default for
+`convert_script`; number expansion stays on either way. The default is the
+first of `zh-TW`, `zh`, `en-US`, `en` the model supports.
 
-`voice` is an id rather than a display name, and it has to belong to the model
-behind the entity you targeted: the 40M entity takes the built-in ids
-(`hojo_zh_f_01`, `hojo_zh_f_02`, and the `hojo_en_*` set), the cloning entity
-takes the ids of the recordings you uploaded, which the app's **Cloned voices**
-page lists. A voice from the wrong model is rejected. Omit it for the server's
-default.
+`voice` is an id, not a display name, and it belongs to one model — the one
+behind the entity you targeted. A voice from another model is rejected. Omit it
+for the server's default. Every model names its voices differently
+(`hojo_zh_f_01`, `anna-su`, `Yuewen`); [Models][models] says how, and the
+action below lists them.
 
-Adding `cache: false` re-synthesises the same text on every call; it is worth
-it only when the message is different every time.
+A message need not end in punctuation, and numbers, units and Traditional
+Chinese are rewritten on the server before synthesis — [the text
+pipeline][text] shows into what.
+
+Adding `cache: false` to `tts.speak` re-synthesises the same text on every
+call; it is worth it only when the message is different every time.
+
+### Finding a voice id
+
+Home Assistant publishes an engine's voice list to the dashboard, over a
+WebSocket command with no action equivalent, so nothing in YAML can reach it.
+This integration adds an action that can:
+
+```yaml
+action: cortex_tts.list_voices
+data:
+  model: moss-nano          # optional; omit for every model
+response_variable: result
+```
+
+Pass `model` for one model's voices, or `entity_id` for the model behind one
+entity — one or the other, not both. Naming a model or entity this server does
+not have is an error rather than an empty list, because an empty list would
+read as "this model has no voices", which is a different problem.
+
+The response is `{voices: [...], count}`. Each voice holds `{voice, name,
+language, gender, source, model, model_name}`. `source` separates a bundled
+voice (`builtin`) from a recording you uploaded (`reference`). `language` is the
+language of the voice, not of the text — a cloned voice declares whichever you
+chose when uploading the recording, and that is what a pipeline filters on,
+because picking the voice is picking the language.
+
+It is also how a conversation agent picks a voice by description instead of by
+an id nobody remembers.
+
+### Per-call options
+
+| Option             | Default                | Meaning                                                                                                                                                                                                                                                                       |
+| ------------------ | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `voice`            | server default         | Voice id — built-in or cloned. See above for how to find one                                                                                                                                                                                                                  |
+| `preferred_format` | `mp3`                  | Container for a buffered reply: `mp3`, `wav`, `flac` or `ogg`, answered directly. Home Assistant asks for `mp3` unless told otherwise, so a plain `tts.speak` is never transcoded. A streamed reply is always MP3, which is what a stream can be without declaring a length it does not know |
+| `audio_output`     | as above               | Read only when `preferred_format` is absent                                                                                                                                                                                                                                   |
+| `normalize_text`   | `true`                 | Expand numbers, units, dates and clock times, in the script of the text                                                                                                                                                                                                       |
+| `convert_script`   | Chinese languages only | Convert Traditional glyphs to Simplified                                                                                                                                                                                                                                      |
+
+The two text switches exist for a caller whose text is already prepared;
+turning conversion off for ordinary Traditional Chinese makes the voice
+unintelligible, and turning normalisation off leaves every digit silent.
 
 ## Options
 
+Settings are per model, not per integration: each model the server offers gets
+its own subentry, because the right answer differs between a model that renders
+in a quarter of real time and one that does not.
+
 [![Open your Home Assistant instance and show this integration.](https://my.home-assistant.io/badges/integration.svg)](https://my.home-assistant.io/redirect/integration/?domain=cortex_tts)
 
-Open the integration and click **Configure**:
+Open the integration, then **Configure** on the model's row. A model cannot be
+added here — it appears by being downloaded in the app.
 
-| Option          | Default            | Meaning                                           |
-| --------------- | ------------------ | ------------------------------------------------- |
-| `stream_models` | models fast enough | Which models speak each sentence as it is written |
+| Setting           | Default    | Meaning                                                                                                                                                                                                                                                                                                                                                                       |
+| ----------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Speaking mode** | `Buffered` | `Buffered` renders the whole reply, then plays it — the longest wait, and it never stalls. `Sentence by sentence` sends each finished sentence on its own. `Sentence by sentence, coalesced` does the same but sends together whatever arrived while the previous request was still being spoken, which removes the pause at each sentence boundary.                         |
+| **Head start**    | `0` s      | Seconds of audio to bank before a streamed reply begins playing, up to 10. A model that renders slower than its audio plays falls behind for the whole reply and never catches up; this hands it the difference in advance. Paid on time to first audio, and a coalesced reply whose full length is known before the first request is charged only what a reply that long can lose. |
 
-Per-call options on `tts.speak`:
+A change applies to the next reply; nothing reloads.
 
-| Option             | Default                | Meaning                                                                                |
-| ------------------ | ---------------------- | -------------------------------------------------------------------------------------- |
-| `voice`            | server default         | Voice id — a built-in voice or a cloned one                                            |
-| `preferred_format` | `wav`                  | `wav`, `flac` or `ogg`; a streamed reply is always WAV and converted by Home Assistant |
-| `audio_output`     | `wav`                  | The same three values, read only when `preferred_format` is absent                     |
-| `normalize_text`   | `true`                 | Expand numbers, units, dates and clock times, in the script of the text                |
-| `convert_script`   | Chinese languages only | Convert Traditional glyphs to Simplified                                               |
-
-[app-repo]: https://github.com/hass-cortex/app-cortex-tts
+**Buffered is the default for every model, deliberately.** Nothing here reads
+the catalog's speed figure to decide for you: that figure was measured on
+whichever machine added the model, and it does not predict yours. Use the
+model for a while, read `sensor.<model>_real_time_factor`, and switch to
+coalesced if it sits comfortably under **0.5**; then watch
+`sensor.<model>_playback_margin`. The reasoning, the measurements and what to
+do when the margin goes negative are in [Keeping up][streaming].
 
 ## How it works
 
-### Traditional Chinese and numbers
+### Streaming
 
-The underlying model cannot pronounce Traditional Chinese glyphs — measured at
-32% character error rate against 4% once converted to Simplified. It also has
-no text normalisation, so `26.5°C` and `14:35` come out as noise.
-
-Both are fixed on the server before synthesis. Number expansion runs for
-every language — the model pronounces no Arabic numeral at all, so an
-unexpanded digit is silent rather than merely wrong — while glyph conversion
-follows the language tag, because rewriting into Simplified is meaningless
-outside Chinese. The `normalize_text` and `convert_script` options exist for
-callers whose text is already prepared; turning conversion off for ordinary
-Traditional Chinese will make the voice unintelligible.
-
-### Per-sentence synthesis
-
-A long reply is normally silent until the last word has been synthesised. With
-this on, each finished sentence is synthesised and played while the rest is
-still being written.
+A long reply is normally silent until the last word has been synthesised. In
+either streaming mode, each finished sentence is synthesised and played while
+the rest is still being written, so the wait before the first word stops
+growing with the length of the reply.
 
 Sentence boundaries come from
 [`sentence-stream`](https://github.com/OHF-Voice/sentence-stream), the same
 splitter Home Assistant's own streaming engines use; it handles `。！？` as well
 as Latin punctuation.
 
-The wait before the first word stops growing with the length of the reply — it
-becomes the time to synthesise one sentence, whatever follows it.
-
-It is chosen per model, under **Configure**, and only the 40M is ticked to start
-with. A model has to synthesise faster than its audio plays to keep a stream
-fed; a cloning model also has to hold one voice steady across separately
-synthesised sentences, which is untested, so the 80M is left for a deliberate
-choice. Untick a model if a media player refuses the stream: a player that
-probes the file before playing — AirPlay targets do — can give up waiting for
-the first bytes of a long reply and fail to open it, while the audio itself is
-perfectly fine. Assist pipelines and voice satellites take streams without
+A model has to synthesise faster than its audio plays to keep a stream fed; a
+cloning model also has to hold one voice steady across separately synthesised
+sentences, so leave the 80M buffered unless you have listened to it streamed.
+Set a model back to buffered if a media player refuses the stream: a player
+that probes the file before playing — AirPlay targets do — can give up waiting
+for the first bytes of a long reply and fail to open it, while the audio itself
+is perfectly fine. Assist pipelines and voice satellites take streams without
 trouble.
 
-Each model's **Last synthesis mode** sensor reports what actually happened —
-`Streamed` or `Buffered`. That is not the same as the tick: Home Assistant
-decides per request, so a ticked model still speaks the buffered way when the
-caller handed it the whole message at once.
+Each model's **Last synthesis mode** sensor reports the mode the model was set
+to when the reply began. Home Assistant routes every reply through that mode —
+a whole message handed to `tts.speak` included, which it wraps as a one-item
+stream — so a model set to coalesced speaks announcements the coalesced way too.
+
+### Talking to the app
+
+- A refusal from the server is reported as the server's own error code and
+  message, so the Home Assistant error names the actual cause.
+- A rejected key — rotated in the app after setup — starts a re-authentication
+  flow by itself; the integration asks for the new key rather than failing every
+  reply the same way. On Home Assistant OS the Supervisor re-announces the app
+  with the new key, and that updates the entry with nothing to type.
+- The limits are on silence from the server rather than on the whole exchange,
+  because synthesis is CPU-bound and grows with the text: 10 s to connect, then
+  180 s between bytes for a buffered reply and 60 s for a streamed one. Other
+  requests to the app time out at 10 s.
+
+## Troubleshooting
+
+- **No voices in the picker.** The model is not downloaded — the entity only
+  exists once it is — or it is the cloning model with no reference recording
+  uploaded yet. Both are fixed in the app; the entity list follows in seconds.
+- **The right words, mispronounced or garbled, in Chinese.** `convert_script`
+  was turned off for Traditional Chinese text, or the language tag was not a
+  `zh-*` one so conversion never ran. Send `language: zh-TW`.
+- **Digits are silent.** `normalize_text` was turned off. The model pronounces
+  no Arabic numeral at all.
+- **It stutters near the end of long replies.** The model is not keeping up on
+  this host; set its **Speaking mode** back to buffered, then read
+  [Keeping up][streaming].
+- **A "re-enter the API key" prompt.** The key was rotated in the app. Paste the
+  current one from the app's Configuration tab.
+- **"Could not reach the Cortex TTS server" at setup.** The entry retries by
+  itself once the app is up. Check the app is running and that the address
+  carries the scheme (`http://…`); from outside the Supervisor network the port
+  must be published in the app's Network settings.
+- **"This app version speaks a different API".** Update whichever of the app
+  and the integration is older.
 
 ## Contributing
 
-Issues and pull requests are welcome. The app this speaks through lives in
-[hass-cortex/app-cortex-tts][app-repo]; a problem with the voice itself, the text
-pipeline or the models usually belongs there.
+Issues and pull requests are welcome; [CONTRIBUTING.md](CONTRIBUTING.md) has
+the checks to run. The app this speaks through lives in
+[hass-cortex/app-cortex-tts][app-repo]; a problem with the voice itself, the
+text pipeline or the models usually belongs there.
 
 ## License
 
 MIT — see [LICENSE](LICENSE).
 
 [app-repo]: https://github.com/hass-cortex/app-cortex-tts
+[app-docs]: https://github.com/hass-cortex/app-cortex-tts/blob/main/cortex-tts/DOCS.md
+[models]: https://github.com/hass-cortex/app-cortex-tts/blob/main/cortex-tts/docs/models.md
+[text]: https://github.com/hass-cortex/app-cortex-tts/blob/main/cortex-tts/docs/text-pipeline.md
+[streaming]: https://github.com/hass-cortex/app-cortex-tts/blob/main/cortex-tts/docs/streaming.md

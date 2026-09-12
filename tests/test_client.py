@@ -16,7 +16,11 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestServer
 
-from custom_components.cortex_tts.client import CortexTTSClient, CortexTTSError
+from custom_components.cortex_tts.client import (
+    CortexTTSAuthError,
+    CortexTTSClient,
+    CortexTTSError,
+)
 
 Handler = Callable[[web.Request], object]
 
@@ -271,3 +275,51 @@ class TestStreamBitrate:
                 async for _ in client.speak_stream("你好。", model="m", voice=None):
                     pass
         assert err.value.code == "malformed_stream"
+
+
+class TestApiVersion:
+    """The one number a client checks before trusting any other field."""
+
+    async def test_a_server_that_reports_another_version_is_refused(self) -> None:
+        async def health(_: web.Request) -> web.Response:
+            return web.json_response({"status": "ok", "api_version": 2})
+
+        async with _client(get_health=health) as client:
+            assert await client.validate() == "unsupported_api"
+
+    async def test_a_server_too_old_to_report_one_is_version_one(self) -> None:
+        async def models(_: web.Request) -> web.Response:
+            return web.json_response([])
+
+        async with _client(get_health=_ok, get_api_models=models) as client:
+            assert await client.validate() is None
+
+
+class TestRefusals:
+    """A server that answers is not a network problem."""
+
+    async def test_a_rejected_key_is_an_auth_error(self) -> None:
+        async def refuse(_: web.Request) -> web.Response:
+            return web.json_response(
+                {"code": "AUTH_REQUIRED", "message": "authentication required"},
+                status=401,
+            )
+
+        async with _client(get_api_models=refuse) as client:
+            with pytest.raises(CortexTTSAuthError) as caught:
+                await client.list_models()
+        assert caught.value.code == "AUTH_REQUIRED"
+        assert not isinstance(caught.value, aiohttp.ClientError)
+
+    async def test_a_model_without_capability_flags_still_lists(self) -> None:
+        """Only id, name, languages and downloaded decide anything here."""
+
+        async def models(_: web.Request) -> web.Response:
+            return web.json_response(
+                [{"id": "m", "name": "M", "languages": ["zh"], "downloaded": True}]
+            )
+
+        async with _client(get_api_models=models) as client:
+            (model,) = await client.list_models()
+        assert model.downloaded is True
+        assert model.cloning is False

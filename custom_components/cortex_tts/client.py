@@ -12,19 +12,35 @@ from .models import ModelInfo, VoiceInfo
 
 _API_TIMEOUT = aiohttp.ClientTimeout(total=10)
 
-# Synthesis is CPU-bound and grows with the length of the text. A long weather
-# summary on a slow host can legitimately take tens of seconds, so this is
-# generous — the pipeline's own timeout is the real ceiling.
-_SPEAK_TIMEOUT = aiohttp.ClientTimeout(total=180)
+# Synthesis is CPU-bound and grows with the length of the text, so the limit
+# is on silence from the server rather than on the whole exchange: a stream
+# that keeps sending frames may run as long as the reply is, and one that
+# stops sending is what a stuck server looks like.
+_SPEAK_TIMEOUT = aiohttp.ClientTimeout(sock_connect=10, sock_read=180)
+_STREAM_TIMEOUT = aiohttp.ClientTimeout(sock_connect=10, sock_read=60)
+
+# The wire shape this client was written against. The server reports its own
+# in /health; a mismatch is refused at setup rather than discovered as a
+# header that reads zero or a field that raises.
+SUPPORTED_API_VERSION = 1
 
 
-class CortexTTSError(aiohttp.ClientError):
-    """The server rejected a request, carrying its error code."""
+class CortexTTSError(Exception):
+    """The server answered, and the answer was a refusal.
+
+    Not an `aiohttp.ClientError`: that family means the request never got an
+    answer, and the two are handled differently — a refusal is reported as
+    what the server said, a transport failure as "cannot connect".
+    """
 
     def __init__(self, message: str, *, code: str | None = None) -> None:
         """Initialize with the server-provided error code."""
         super().__init__(message)
         self.code = code
+
+
+class CortexTTSAuthError(CortexTTSError):
+    """The stored key was rejected; the entry needs re-authentication."""
 
 
 class CortexTTSClient:
@@ -51,20 +67,27 @@ class CortexTTSClient:
         async with self._session.get(
             f"{self._host}/health", timeout=_API_TIMEOUT
         ) as response:
-            response.raise_for_status()
+            await _raise_for_status(response)
             return await response.json()
 
     async def validate(self) -> str | None:
-        """Check connectivity and auth.
+        """Check connectivity, auth and the wire version.
 
         Returns:
-            ``None`` when usable, otherwise ``cannot_connect`` or
-            ``invalid_api_key`` — the translation keys the config flow shows.
+            ``None`` when usable, otherwise ``cannot_connect``,
+            ``invalid_api_key`` or ``unsupported_api`` — the translation keys
+            the config flow shows.
         """
         try:
-            await self.health()
-        except aiohttp.ClientError, TimeoutError:
+            health = await self.health()
+        except aiohttp.ClientError, TimeoutError, CortexTTSError:
             return "cannot_connect"
+        # A server too old to report one speaks version 1; the field was
+        # added without changing anything it describes.
+        if int(health.get("api_version", SUPPORTED_API_VERSION)) != (
+            SUPPORTED_API_VERSION
+        ):
+            return "unsupported_api"
 
         try:
             async with self._session.get(
@@ -72,10 +95,10 @@ class CortexTTSClient:
                 headers=self._headers,
                 timeout=_API_TIMEOUT,
             ) as response:
-                if response.status in (401, 403):
-                    return "invalid_api_key"
-                response.raise_for_status()
-        except aiohttp.ClientError, TimeoutError:
+                await _raise_for_status(response)
+        except CortexTTSAuthError:
+            return "invalid_api_key"
+        except aiohttp.ClientError, TimeoutError, CortexTTSError:
             return "cannot_connect"
 
         return None
@@ -85,17 +108,20 @@ class CortexTTSClient:
         async with self._session.get(
             f"{self._host}/api/models", headers=self._headers, timeout=_API_TIMEOUT
         ) as response:
-            response.raise_for_status()
+            await _raise_for_status(response)
             payload = await response.json()
 
+        # Only `id`, `name`, `languages` and `downloaded` decide anything
+        # here; the capability flags are carried for diagnostics and must
+        # not be able to take the entry down when the server drops one.
         return [
             ModelInfo(
                 id=item["id"],
                 name=item["name"],
                 description=item.get("description", ""),
-                builtin_voices=bool(item["builtin_voices"]),
-                cloning=bool(item["cloning"]),
-                chunk_streaming=bool(item["chunk_streaming"]),
+                builtin_voices=bool(item.get("builtin_voices", False)),
+                cloning=bool(item.get("cloning", False)),
+                chunk_streaming=bool(item.get("chunk_streaming", False)),
                 languages=item.get("languages") or [],
                 sample_rate=item.get("sample_rate", 24000),
                 downloaded=bool(item.get("downloaded")),
@@ -114,7 +140,7 @@ class CortexTTSClient:
             params=params,
             timeout=_API_TIMEOUT,
         ) as response:
-            response.raise_for_status()
+            await _raise_for_status(response)
             payload = await response.json()
 
         return [
@@ -170,9 +196,7 @@ class CortexTTSClient:
             json=body,
             timeout=_SPEAK_TIMEOUT,
         ) as response:
-            if response.status >= 400:
-                code, message = await _error_detail(response)
-                raise CortexTTSError(message, code=code)
+            await _raise_for_status(response)
             audio = await response.read()
             stats = {
                 "inference_ms": _header_float(response, "X-Cortex-Inference-Ms"),
@@ -194,9 +218,8 @@ class CortexTTSClient:
 
         MP3, which is a bare sequence of self-describing frames: playable from
         the first chunk, and with no length to declare. A WAV stream has to
-        declare one before the audio exists, and the maximal value it used to
-        send made a general-purpose player wait for a file it believed was six
-        hours long.
+        declare one before the audio exists, and a general-purpose player waits
+        for whatever length it declares.
 
         Yields:
             ``(bitrate, chunk)`` in order, where bitrate is bits per second of
@@ -222,11 +245,9 @@ class CortexTTSClient:
             f"{self._host}/api/speak/stream",
             headers=self._headers,
             json=body,
-            timeout=_SPEAK_TIMEOUT,
+            timeout=_STREAM_TIMEOUT,
         ) as response:
-            if response.status >= 400:
-                code, message = await _error_detail(response)
-                raise CortexTTSError(message, code=code)
+            await _raise_for_status(response)
             bitrate = _header_int(response, "X-Cortex-Bitrate")
             if bitrate <= 0:
                 raise CortexTTSError(
@@ -237,6 +258,21 @@ class CortexTTSClient:
             async for chunk in response.content.iter_any():
                 if chunk:
                     yield bitrate, chunk
+
+
+async def _raise_for_status(response: aiohttp.ClientResponse) -> None:
+    """Turn a refusal into the server's own code and message.
+
+    Raises:
+        CortexTTSAuthError: 401 or 403.
+        CortexTTSError: Any other status of 400 or above.
+    """
+    if response.status < 400:
+        return
+    code, message = await _error_detail(response)
+    if response.status in (401, 403):
+        raise CortexTTSAuthError(message, code=code)
+    raise CortexTTSError(message, code=code)
 
 
 async def _error_detail(response: aiohttp.ClientResponse) -> tuple[str, str]:

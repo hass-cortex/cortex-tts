@@ -10,6 +10,7 @@ import aiohttp
 from homeassistant.config_entries import (
     ConfigEntry,
     ConfigEntryNotReady,
+    ConfigEntryState,
     ConfigSubentry,
 )
 from homeassistant.core import Event, HomeAssistant, callback
@@ -20,7 +21,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.typing import ConfigType
 
-from .client import CortexTTSClient
+from .client import CortexTTSClient, CortexTTSError
 from .const import (
     CONF_API_KEY,
     CONF_HOST,
@@ -30,6 +31,7 @@ from .const import (
     models_changed_signal,
 )
 from .models import CortexTTSRuntimeData, ModelInfo, VoiceInfo
+from .services import async_register_services
 
 type CortexTTSConfigEntry = ConfigEntry[CortexTTSRuntimeData]
 
@@ -61,14 +63,21 @@ async def _collect_voices(
     for model in models:
         try:
             voices[model.id] = await client.list_voices(model.id)
-        except (aiohttp.ClientError, TimeoutError, ValueError, KeyError) as err:
+        except (
+            aiohttp.ClientError,
+            TimeoutError,
+            CortexTTSError,
+            ValueError,
+            KeyError,
+        ) as err:
             _LOGGER.warning("could not list voices for %s: %s", model.id, err)
             voices[model.id] = []
     return voices
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Set up the integration."""
+    """Register the domain's services, which outlive any one entry."""
+    async_register_services(hass)
     return True
 
 
@@ -86,6 +95,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: CortexTTSConfigEntry) ->
         raise ConfigEntryAuthFailed(
             translation_domain=DOMAIN, translation_key="invalid_api_key"
         )
+    if error == "unsupported_api":
+        # Retrying will not help until one side is updated, but the entry
+        # must not be marked failed for good: the app updates on its own.
+        raise ConfigEntryNotReady(
+            translation_domain=DOMAIN, translation_key="unsupported_api"
+        )
     if error:
         raise ConfigEntryNotReady(
             translation_domain=DOMAIN,
@@ -95,7 +110,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: CortexTTSConfigEntry) ->
 
     try:
         all_models = await client.list_models()
-    except (aiohttp.ClientError, TimeoutError, ValueError, KeyError) as err:
+    except (
+        aiohttp.ClientError,
+        TimeoutError,
+        CortexTTSError,
+        ValueError,
+        KeyError,
+    ) as err:
         raise ConfigEntryNotReady(
             translation_domain=DOMAIN,
             translation_key="list_models_failed",
@@ -120,8 +141,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: CortexTTSConfigEntry) ->
         try:
             refreshed = _usable(await client.list_models())
             refreshed_voices = await _collect_voices(client, refreshed)
-        except (aiohttp.ClientError, TimeoutError, ValueError, KeyError) as err:
+        except (
+            aiohttp.ClientError,
+            TimeoutError,
+            CortexTTSError,
+            ValueError,
+            KeyError,
+        ) as err:
             _LOGGER.warning("models-changed event but refresh failed: %s", err)
+            return
+        if entry.state is not ConfigEntryState.LOADED:
+            # The entry unloaded while the refresh was in flight; its
+            # subentries and devices are no longer ours to touch.
             return
         entry.runtime_data.models = refreshed
         entry.runtime_data.voices = refreshed_voices
@@ -142,9 +173,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: CortexTTSConfigEntry) -
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
 
-# Options that moved into per-model subentries. Left in place they are dead
-# weight in diagnostics, read as configuration by anyone looking, and would
-# quietly come back to life if a key were ever reused.
+# Options that moved into per-model subentries; left in place they would
+# come back to life if a key were ever reused.
 RETIRED_OPTIONS: Final = ("stream_models",)
 
 

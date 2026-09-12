@@ -69,17 +69,30 @@ class _Entity:
 
 
 _module("homeassistant")
+
+
+class _SupportsResponse(StrEnum):
+    """Only what the service registration passes."""
+
+    ONLY = "only"
+    OPTIONAL = "optional"
+
+
 _module(
     "homeassistant.core",
     HomeAssistant=MagicMock,
     Event=type("Event", (), {}),
     callback=lambda f: f,
+    ServiceCall=type("ServiceCall", (), {}),
+    ServiceResponse=dict,
+    SupportsResponse=_SupportsResponse,
 )
 _module(
     "homeassistant.exceptions",
     HomeAssistantError=_HomeAssistantError,
     ConfigEntryAuthFailed=type("ConfigEntryAuthFailed", (_HomeAssistantError,), {}),
     ConfigEntryNotReady=type("ConfigEntryNotReady", (_HomeAssistantError,), {}),
+    ServiceValidationError=type("ServiceValidationError", (_HomeAssistantError,), {}),
 )
 
 
@@ -112,9 +125,17 @@ class _ConfigSubentry:
     subentry_id: str = field(default_factory=lambda: uuid4().hex)
 
 
+class _ConfigEntryState(StrEnum):
+    """Only the member the services module compares against."""
+
+    LOADED = "loaded"
+    NOT_LOADED = "not_loaded"
+
+
 _module(
     "homeassistant.config_entries",
     ConfigEntry=MagicMock,
+    ConfigEntryState=_ConfigEntryState,
     ConfigFlow=type(
         "ConfigFlow", (), {"__init_subclass__": classmethod(lambda cls, **kw: None)}
     ),
@@ -129,10 +150,14 @@ _module("homeassistant.helpers")
 _module(
     "homeassistant.helpers.config_validation",
     config_entry_only_config_schema=lambda domain: {},
+    string=str,
+    entity_id=str,
+    has_at_most_one_key=lambda *keys: lambda value: value,
 )
 _module("homeassistant.helpers.typing", ConfigType=dict, StateType=object)
 _module("homeassistant.helpers.aiohttp_client", async_get_clientsession=MagicMock())
 _module("homeassistant.helpers.entity", Entity=_Entity)
+_module("homeassistant.helpers.entity_registry", async_get=MagicMock())
 _module("homeassistant.helpers.entity_platform", AddConfigEntryEntitiesCallback=object)
 _module(
     "homeassistant.helpers.dispatcher",

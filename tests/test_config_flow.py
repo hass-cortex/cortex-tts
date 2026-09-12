@@ -11,10 +11,15 @@ visible as a second round of model loads in the app log.
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import MagicMock
 
+import pytest
 from homeassistant.helpers.service_info.hassio import HassioServiceInfo
 
-from custom_components.cortex_tts.config_flow import CortexTTSConfigFlow
+from custom_components.cortex_tts.config_flow import (
+    CortexTTSConfigFlow,
+    normalise_host,
+)
 from custom_components.cortex_tts.const import CONF_API_KEY, CONF_HOST
 
 HOST = "http://local-cortex-tts:8771"
@@ -79,3 +84,71 @@ async def test_the_entry_is_still_updated_and_adopted() -> None:
     assert flow.aborted["entry"] is entry
     assert flow.aborted["data_updates"] == {CONF_HOST: HOST, CONF_API_KEY: "rotated"}
     assert flow.aborted["unique_id"] == UUID
+
+
+class _AbortError(Exception):
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+class _UserFlow(_Flow):
+    """The manual flow, with Core's duplicate checks standing in."""
+
+    def __init__(self, entries: list[_Entry]) -> None:
+        super().__init__(entries)
+        self.hass = MagicMock()
+        self.unique_id: str | None = None
+
+    def _async_abort_entries_match(self, match: dict[str, Any]) -> None:
+        for entry in self._entries:
+            if all(entry.data.get(k) == v for k, v in match.items()):
+                raise _AbortError("already_configured")
+
+    async def _validate_input(self, host: str, api_key: str) -> tuple[None, Any]:
+        return None, MagicMock()
+
+    async def _titled(self, client: Any, base: str) -> str:
+        return base
+
+    async def async_set_unique_id(self, unique_id: str) -> None:
+        self.unique_id = unique_id
+
+    def _abort_if_unique_id_configured(self) -> None:
+        return None
+
+    def async_create_entry(self, *, title: str, data: dict[str, Any]) -> dict:
+        return {"type": "create_entry", "title": title, "data": data}
+
+
+class TestOneEntryPerServer:
+    """A discovered entry and a hand-added one must not both point at a host."""
+
+    @pytest.mark.parametrize("typed", [HOST, HOST + "/", "local-cortex-tts:8771"])
+    async def test_adding_a_discovered_server_by_hand_is_refused(
+        self, typed: str
+    ) -> None:
+        discovered = _Entry(**{CONF_HOST: HOST, CONF_API_KEY: "key-1"})
+        flow = _UserFlow([discovered])
+        with pytest.raises(_AbortError, match="already_configured"):
+            await flow.async_step_user({CONF_HOST: typed, CONF_API_KEY: "key-1"})
+
+    async def test_the_stored_host_is_normalised(self) -> None:
+        flow = _UserFlow([])
+        result = await flow.async_step_user(
+            {CONF_HOST: "homeassistant.local:8771/", CONF_API_KEY: "k"}
+        )
+        assert result["data"][CONF_HOST] == "http://homeassistant.local:8771"
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("http://x:8771", "http://x:8771"),
+        ("http://x:8771/", "http://x:8771"),
+        (" x:8771 ", "http://x:8771"),
+        ("https://x", "https://x"),
+    ],
+)
+def test_normalise_host(raw: str, expected: str) -> None:
+    assert normalise_host(raw) == expected

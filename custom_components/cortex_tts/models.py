@@ -11,11 +11,10 @@ from .const import (
     CONF_HEAD_START,
     CONF_STREAM_MODE,
     DEFAULT_HEAD_START,
+    DOMAIN,
     MAX_HEAD_START,
     STREAM_BUFFERED,
-    STREAM_COALESCED,
     STREAM_MODES,
-    STREAM_RTF_CEILING,
     SUBENTRY_TYPE,
 )
 
@@ -30,8 +29,10 @@ class VoiceInfo:
     Attributes:
         id: Identifier to send back in a synthesis request.
         name: Label shown in the Home Assistant voice picker.
-        language: Base language code, or ``None`` for a cloned voice that
-            carries no declared language.
+        language: Base language code, or ``None`` when the voice declares
+            none. A reference recording always declares one — it is chosen on
+            upload — so in practice the ``None`` case is a built-in voice whose
+            id the bundle's reader could not classify.
         gender: ``female``, ``male`` or ``unknown``.
         source: ``builtin`` or ``reference``.
     """
@@ -59,15 +60,6 @@ class ModelInfo:
     loaded: bool
     rtf_hint: float = 0.0
     """The catalog's relative cost figure, 0.0 when the server reports none."""
-
-    @property
-    def outruns_playback(self) -> bool:
-        """Whether this model synthesises faster than its audio plays.
-
-        An unknown rate counts as too slow: streaming a model that cannot keep
-        up stalls mid-reply, so it is not something to assume.
-        """
-        return 0.0 < self.rtf_hint < STREAM_RTF_CEILING
 
 
 @dataclass
@@ -102,9 +94,9 @@ class SpeechStats:
     A consumer with a small buffer stutters on this even while the margin
     above stays healthy, so the two answer different questions."""
     mode: str = STREAM_BUFFERED
-    """How this reply reached the speaker — one of `STREAM_MODES`. What
-    happened, not what was configured: a caller that hands over the whole
-    message at once is spoken buffered whatever the model is set to."""
+    """How this reply reached the speaker — one of `STREAM_MODES`. The mode
+    the model was set to when the reply began; Home Assistant routes every
+    reply through it, a message handed over whole included."""
 
 
 @dataclass
@@ -138,16 +130,27 @@ def model_subentry(entry: ConfigEntry, model_id: str) -> ConfigSubentry | None:
     return None
 
 
-def default_stream_mode(model: ModelInfo | None) -> str:
-    """How a model speaks until someone chooses for it.
+def entity_unique_id(entry_id: str, model_id: str) -> str:
+    """The unique id a model's TTS entity is registered under."""
+    return f"{DOMAIN}_{entry_id}_{model_id}"
 
-    Coalesced rather than plain sentence streaming, because sending one
-    sentence at a time costs a fresh prefill per sentence and buys nothing a
-    coalesced stream does not already give — including time to first audio.
-    A model that cannot stay ahead of its own audio is not streamed at all.
+
+def model_from_unique_id(entry_id: str, unique_id: str) -> str | None:
+    """Recover the model id from an entity's unique id, or None.
+
+    Matched against the prefix the entity was built with rather than split on
+    the separator, because a model id may contain one.
     """
-    if model is not None and model.outruns_playback:
-        return STREAM_COALESCED
+    prefix = f"{DOMAIN}_{entry_id}_"
+    return unique_id.removeprefix(prefix) if unique_id.startswith(prefix) else None
+
+
+def default_stream_mode() -> str:
+    """How a model speaks until someone chooses for it: buffered, always.
+
+    Takes no model on purpose: the catalog's `rtf_hint` is measured on another
+    machine and does not predict this one.
+    """
     return STREAM_BUFFERED
 
 
@@ -162,7 +165,7 @@ def stream_mode(entry: ConfigEntry, model: ModelInfo) -> str:
         configured = subentry.data.get(CONF_STREAM_MODE)
         if configured in STREAM_MODES:
             return str(configured)
-    return default_stream_mode(model)
+    return default_stream_mode()
 
 
 def head_start(entry: ConfigEntry, model: ModelInfo) -> float:

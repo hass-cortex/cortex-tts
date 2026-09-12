@@ -25,7 +25,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from sentence_stream import SentenceBoundaryDetector
 
-from .client import CortexTTSClient, CortexTTSError
+from .client import CortexTTSAuthError, CortexTTSClient, CortexTTSError
 from .const import (
     ASSUMED_DEFICIT,
     CHARS_PER_SECOND,
@@ -45,6 +45,7 @@ from .models import (
     ModelInfo,
     SpeechStats,
     VoiceInfo,
+    entity_unique_id,
     head_start,
     stream_mode,
 )
@@ -54,9 +55,11 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-PARALLEL_UPDATES = 1
+PARALLEL_UPDATES = 0
 
-SUPPORTED_FORMATS = ("wav", "flac", "ogg")
+# Home Assistant asks for mp3 unless told otherwise; answering in another
+# container makes it transcode every reply through ffmpeg.
+SUPPORTED_FORMATS = ("mp3", "wav", "flac", "ogg")
 
 # Home Assistant scores a pipeline's language against this list and copies the
 # winner into the request, so advertising the regional tags is what keeps
@@ -190,7 +193,8 @@ class _Delivery:
         self._last = 0.0
         self._audio = 0.0
         self.margin: float | None = None
-        self.longest_gap = 0.0
+        self.longest_gap: float | None = None
+        """Unmeasured until a second send exists to measure a gap before."""
 
     def sent(self, seconds: float) -> None:
         """Record that this much audio has now left."""
@@ -198,7 +202,7 @@ class _Delivery:
         if self._started is None:
             self._started = self._last = now
         else:
-            self.longest_gap = max(self.longest_gap, now - self._last)
+            self.longest_gap = max(self.longest_gap or 0.0, now - self._last)
             self._last = now
         self._audio += seconds
         elapsed = now - self._started
@@ -284,6 +288,7 @@ class CortexTTSEntity(TextToSpeechEntity):
     # naming the entity after its device produces. The model name is the
     # engine name users pick in a pipeline, so carry it explicitly.
     _attr_has_entity_name = False
+    _attr_translation_key = "cortex_tts"
 
     def __init__(
         self,
@@ -301,7 +306,7 @@ class CortexTTSEntity(TextToSpeechEntity):
         self._config_entry = config_entry
         self._client = client
         self._model = model
-        self._attr_unique_id = f"{DOMAIN}_{config_entry.entry_id}_{model.id}"
+        self._attr_unique_id = entity_unique_id(config_entry.entry_id, model.id)
         self._attr_name = model.name
         self._attr_supported_languages = _expand_languages(model.languages)
         self._attr_default_language = _default_language(self._attr_supported_languages)
@@ -322,9 +327,10 @@ class CortexTTSEntity(TextToSpeechEntity):
     def async_get_supported_voices(self, language: str) -> list[Voice] | None:
         """Return voices for a language.
 
-        Cloned voices carry no declared language, so they are offered for every
-        language rather than hidden — the reference recording, not a metadata
-        field, decides what they can say.
+        A cloned voice is filtered like any other, because the language it
+        declares is the language of the recording behind it, and picking the
+        voice is picking the language — no model here takes one as a parameter.
+        A voice that declares nothing is offered everywhere rather than hidden.
         """
         base = language.split("-")[0].lower()
         matching = [
@@ -339,9 +345,10 @@ class CortexTTSEntity(TextToSpeechEntity):
 
         Home Assistant's name for the hook is about *text* streaming in; what
         it decides here is whether audio goes out before the text is complete.
-        The answer is this model's own setting, in its own subentry — until
-        someone changes it, one fast enough to stay ahead of the speaker
-        streams and a slower one does not.
+        The answer is this model's own setting, in its own subentry, buffered
+        until someone changes it. It routes every reply, including one handed
+        over whole: Home Assistant wraps a finished message in a one-item
+        stream when this returns true.
         """
         return self._stream_mode() != STREAM_BUFFERED
 
@@ -368,6 +375,11 @@ class CortexTTSEntity(TextToSpeechEntity):
     ) -> HomeAssistantError:
         """Record a failed synthesis and return the error to raise."""
         self._push_stats(SpeechStats(success=False, language=language))
+        if isinstance(err, CortexTTSAuthError):
+            # The key was rotated under us; asking for a new one is the fix,
+            # and every reply until then would fail the same way.
+            self._config_entry.async_start_reauth(self.hass)
+            translation_key = "invalid_api_key"
         _LOGGER.error("synthesis failed on %s: %s", self._model.id, err)
         return HomeAssistantError(
             translation_domain=DOMAIN,
@@ -518,7 +530,7 @@ class CortexTTSEntity(TextToSpeechEntity):
             # The server streams within a request too, so the first audio
             # arrives partway through the first sentence rather than at the end
             # of it. A model that cannot do that sends the whole request as one
-            # chunk, which is what this did for every model before.
+            # chunk.
             try:
                 async for bitrate, frames in self._client.speak_stream(
                     text,
@@ -565,9 +577,6 @@ class CortexTTSEntity(TextToSpeechEntity):
                 raise self._failed(err, request.language, "synthesis_failed") from err
             except (aiohttp.ClientError, TimeoutError) as err:
                 raise self._failed(err, request.language, "cannot_connect") from err
-            except ValueError as err:
-                # A stream whose header never parsed as WAV.
-                raise self._failed(err, request.language, "synthesis_failed") from err
 
             characters += len(text)
 
@@ -598,7 +607,11 @@ class CortexTTSEntity(TextToSpeechEntity):
                 voice=str(voice or ""),
                 mode=mode,
                 margin_seconds=delivery.margin,
-                longest_gap_ms=delivery.longest_gap * 1000,
+                longest_gap_ms=(
+                    None
+                    if delivery.longest_gap is None
+                    else delivery.longest_gap * 1000
+                ),
             )
         )
         _LOGGER.debug(
@@ -613,5 +626,5 @@ class CortexTTSEntity(TextToSpeechEntity):
             _rtf(elapsed_ms, audio_seconds),
             first_audio_ms,
             delivery.margin if delivery.margin is not None else 0.0,
-            delivery.longest_gap * 1000,
+            (delivery.longest_gap or 0.0) * 1000,
         )

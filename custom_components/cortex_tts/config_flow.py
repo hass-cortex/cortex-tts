@@ -29,7 +29,7 @@ from homeassistant.helpers.selector import (
 )
 from homeassistant.helpers.service_info.hassio import HassioServiceInfo
 
-from .client import CortexTTSClient
+from .client import CortexTTSClient, CortexTTSError
 from .const import (
     CONF_API_KEY,
     CONF_HEAD_START,
@@ -53,6 +53,14 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 )
 
 STEP_REAUTH_SCHEMA = vol.Schema({vol.Required(CONF_API_KEY): str})
+
+
+def normalise_host(host: str) -> str:
+    """One spelling per server, so two entries cannot point at the same one."""
+    host = host.strip().rstrip("/")
+    if "://" not in host:
+        host = f"http://{host}"
+    return host
 
 
 class CortexTTSConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
@@ -86,7 +94,7 @@ class CortexTTSConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
     async def _titled(self, client: CortexTTSClient, base: str) -> str:
         """Append the server version to a title when it can be read."""
         with contextlib.suppress(
-            aiohttp.ClientError, TimeoutError, KeyError, ValueError
+            aiohttp.ClientError, TimeoutError, CortexTTSError, KeyError, ValueError
         ):
             health = await client.health()
             if version := health.get("version"):
@@ -100,19 +108,22 @@ class CortexTTSConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            error, client = await self._validate_input(
-                user_input[CONF_HOST], user_input[CONF_API_KEY]
-            )
+            host = normalise_host(user_input[CONF_HOST])
+            # A discovered entry carries the Supervisor's uuid, not a hash of
+            # the host, so the unique id alone cannot catch this duplicate.
+            self._async_abort_entries_match({CONF_HOST: host})
+            error, client = await self._validate_input(host, user_input[CONF_API_KEY])
             if error:
                 errors["base"] = error
             else:
-                unique_id = hashlib.sha256(user_input[CONF_HOST].encode()).hexdigest()[
-                    :16
-                ]
+                unique_id = hashlib.sha256(host.encode()).hexdigest()[:16]
                 await self.async_set_unique_id(unique_id)
                 self._abort_if_unique_id_configured()
                 title = await self._titled(client, "Cortex TTS")
-                return self.async_create_entry(title=title, data=user_input)
+                return self.async_create_entry(
+                    title=title,
+                    data={CONF_HOST: host, CONF_API_KEY: user_input[CONF_API_KEY]},
+                )
 
         return self.async_show_form(
             step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
@@ -134,13 +145,8 @@ class CortexTTSConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
 
         # Adopt a matching hand-added entry: its unique id is a hash of the
         # host, not the Supervisor uuid, so the fast path below would miss it.
-        #
-        # The Supervisor replays its discovery records on every Home Assistant
-        # start, and this branch matches on the host, which never changes — so
-        # it is reached long after there is anything left to adopt. Reloading
-        # unconditionally (the default) therefore tore the entry down and set
-        # it up again on every restart. Rotating the key still reloads: the
-        # stored data really does change then.
+        # The Supervisor replays discovery on every Home Assistant start, so
+        # this must not reload an entry whose data did not change.
         for entry in self._async_current_entries(include_ignore=False):
             if entry.data.get(CONF_HOST) == host:
                 return self.async_update_reload_and_abort(
@@ -244,15 +250,12 @@ class ModelSubentryFlow(ConfigSubentryFlow):
         if user_input is not None:
             return self.async_update_and_abort(entry, subentry, data_updates=user_input)
 
-        model = next(
-            (m for m in entry.runtime_data.models if m.id == subentry.unique_id), None
-        )
         schema = vol.Schema(
             {
                 vol.Required(
                     CONF_STREAM_MODE,
                     default=subentry.data.get(CONF_STREAM_MODE)
-                    or default_stream_mode(model),
+                    or default_stream_mode(),
                 ): SelectSelector(
                     SelectSelectorConfig(
                         options=[

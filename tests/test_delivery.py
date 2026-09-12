@@ -101,4 +101,4 @@ class TestLongestGap:
         clock.advance(30.0)
         delivery = _Delivery()
         delivery.sent(5.0)
-        assert delivery.longest_gap == 0.0
+        assert delivery.longest_gap is None

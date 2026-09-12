@@ -8,6 +8,7 @@ import aiohttp
 from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.core import HomeAssistant
 
+from .client import CortexTTSError
 from .const import CONF_API_KEY, STREAM_RTF_CEILING
 from .models import default_stream_mode, stream_mode
 
@@ -32,7 +33,7 @@ async def async_get_config_entry_diagnostics(
     health: dict[str, Any] | str
     try:
         health = await runtime.client.health()
-    except (aiohttp.ClientError, TimeoutError) as err:
+    except (aiohttp.ClientError, TimeoutError, CortexTTSError) as err:
         health = f"unreachable: {err}"
 
     return {
@@ -59,7 +60,7 @@ async def async_get_config_entry_diagnostics(
                 "loaded": model.loaded,
                 "rtf_hint": model.rtf_hint,
                 "stream_mode": stream_mode(entry, model),
-                "stream_mode_default": default_stream_mode(model),
+                "stream_mode_default": default_stream_mode(),
                 "voices": [
                     {"id": v.id, "language": v.language, "source": v.source}
                     for v in runtime.voices.get(model.id, [])
