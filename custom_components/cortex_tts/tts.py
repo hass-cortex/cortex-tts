@@ -28,12 +28,11 @@ from sentence_stream import SentenceBoundaryDetector
 from .client import CortexTTSAuthError, CortexTTSClient, CortexTTSError
 from .const import (
     ASSUMED_DEFICIT,
-    CHARS_PER_SECOND,
     CONF_CONVERT_SCRIPT,
     CONF_NORMALIZE_TEXT,
     DOMAIN,
     FIRST_AUDIO_FIELDS,
-    MAX_REQUEST_CHARS,
+    MAX_REQUEST_SECONDS,
     STREAM_BUFFERED,
     STREAM_COALESCED,
     STREAM_FORMAT,
@@ -49,6 +48,7 @@ from .models import (
     head_start,
     stream_mode,
 )
+from .text import audio_seconds, deliverable
 
 if TYPE_CHECKING:
     from . import CortexTTSConfigEntry
@@ -145,15 +145,15 @@ class _HeadStart:
         """Whether audio now goes straight out."""
         return self._remaining <= 0.0
 
-    def shorten_for(self, characters: int) -> None:
-        """Lower the bank to what a reply of this length can lose.
+    def shorten_for(self, seconds: float) -> None:
+        """Lower the bank to what a reply this long can lose.
 
         Called once the whole reply is known, which is most of the time: a
         caller that hands over a finished message, or a writer that finished
         before synthesis caught up. Never raises the bank — a reply longer
         than expected keeps what was configured.
         """
-        needed = ASSUMED_DEFICIT * characters / CHARS_PER_SECOND
+        needed = ASSUMED_DEFICIT * seconds
         self._remaining = min(self._remaining, max(0.0, needed - self.banked))
 
     def feed(self, chunk: bytes, seconds: float) -> list[bytes]:
@@ -208,7 +208,9 @@ class _Delivery:
         self._audio += seconds
 
 
-async def _coalesced(sentences: AsyncIterator[str]) -> AsyncGenerator[tuple[str, int]]:
+async def _coalesced(
+    sentences: AsyncIterator[str],
+) -> AsyncGenerator[tuple[str, float]]:
     """Group sentences into requests of a size the model renders well.
 
     There is a cliff on either side of this. One sentence per request makes
@@ -220,9 +222,9 @@ async def _coalesced(sentences: AsyncIterator[str]) -> AsyncGenerator[tuple[str,
     in one go, against 6.5% for the same story in two.
 
     So a batch takes everything that arrived while the last request was
-    streaming, up to `MAX_REQUEST_CHARS`, and leaves the rest for the next
-    one. A slow writer still degrades to one sentence per request, which is
-    all there is to send.
+    streaming, up to `MAX_REQUEST_SECONDS` of audio, and leaves the rest for
+    the next one. A slow writer still degrades to one sentence per request,
+    which is all there is to send.
 
     Yields each batch with the length of the whole reply once the writer has
     finished, which is what lets a head start be sized against a length that
@@ -256,18 +258,21 @@ async def _coalesced(sentences: AsyncIterator[str]) -> AsyncGenerator[tuple[str,
                     break
                 pending.append(nxt)
 
-            reply_chars = sum(len(part) for part in pending) if finished else 0
+            reply_seconds = (
+                sum(audio_seconds(part) for part in pending) if finished else 0.0
+            )
 
             batch: list[str] = []
-            size = 0
-            # Always take one, however long: a single sentence over the cap
-            # has nowhere smaller to go.
+            size = 0.0
+            # Always take one: every piece arrives already within the limit,
+            # so the only way one can exceed it is text this measurement has
+            # never seen, and it still has to be spoken.
             while pending and (
-                not batch or size + len(pending[0]) <= MAX_REQUEST_CHARS
+                not batch or size + audio_seconds(pending[0]) <= MAX_REQUEST_SECONDS
             ):
-                size += len(pending[0])
+                size += audio_seconds(pending[0])
                 batch.append(pending.pop(0))
-            yield "".join(batch), reply_chars
+            yield "".join(batch), reply_seconds
 
             if finished and not pending:
                 break
@@ -493,12 +498,21 @@ class CortexTTSEntity(TextToSpeechEntity):
         first_audio_ms = 0.0
 
         async def _sentences() -> AsyncGenerator[str]:
-            """Yield complete sentences as the reply is written."""
+            """Yield speakable pieces as the reply is written.
+
+            A sentence longer than a request may be is cut here rather than
+            in either mode, so both of them inherit the same limit: the
+            run-on sentence is the one shape that neither mode could deliver
+            in time, because it arrives as a single lump whatever is done
+            with it afterwards.
+            """
             async for chunk in request.message_gen:
                 for sentence in detector.add_chunk(chunk):
-                    yield sentence
+                    for piece in deliverable(sentence, MAX_REQUEST_SECONDS):
+                        yield piece
             if tail := detector.finish():
-                yield tail
+                for piece in deliverable(tail, MAX_REQUEST_SECONDS):
+                    yield piece
 
         mode = self._stream_mode()
         bank = _HeadStart(head_start(self._config_entry, self._model))
@@ -512,14 +526,14 @@ class CortexTTSEntity(TextToSpeechEntity):
             else ((sentence, 0) async for sentence in sentences)
         )
 
-        async for text, reply_chars in requests:
+        async for text, reply_seconds in requests:
             if not text.strip():
                 continue
-            if sent == 0 and reply_chars:
+            if sent == 0 and reply_seconds:
                 # The writer had finished before the first request went out,
                 # so how much this reply can lose is arithmetic rather than a
                 # guess — even when it takes several requests to say it.
-                bank.shorten_for(reply_chars)
+                bank.shorten_for(reply_seconds)
             # How many requests a reply took is the whole difference between
             # the streaming modes, and nothing else records it.
             sent += 1

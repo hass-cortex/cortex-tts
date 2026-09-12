@@ -16,7 +16,6 @@ import pytest
 
 from custom_components.cortex_tts.const import (
     ASSUMED_DEFICIT,
-    CHARS_PER_SECOND,
     CONF_HEAD_START,
     DEFAULT_HEAD_START,
     MAX_HEAD_START,
@@ -70,18 +69,18 @@ class TestShortenFor:
     """A reply whose length is known pays only what that length can lose."""
 
     @staticmethod
-    def _needed(characters: int) -> float:
-        return ASSUMED_DEFICIT * characters / CHARS_PER_SECOND
+    def _needed(seconds: float) -> float:
+        return ASSUMED_DEFICIT * seconds
 
     def test_a_one_line_answer_barely_waits(self) -> None:
         """The case that made this necessary: two seconds for "the light is on"."""
         bank = _HeadStart(2.0)
-        bank.shorten_for(10)
-        assert bank.feed(FRAME, self._needed(10) + 0.01) != []
+        bank.shorten_for(2.4)
+        assert bank.feed(FRAME, self._needed(2.4) + 0.01) != []
 
     def test_a_long_reply_keeps_the_whole_bank(self) -> None:
         bank = _HeadStart(2.0)
-        bank.shorten_for(173)  # the measured bulletin: it needs 3.9s, capped at 2
+        bank.shorten_for(39.6)  # the measured bulletin: it needs 3.9s, capped at 2
         assert bank.feed(FRAME, 1.9) == []
         assert bank.feed(FRAME, 0.2) != []
 
@@ -95,13 +94,13 @@ class TestShortenFor:
         """Called after audio has arrived, it must not ask for that twice."""
         bank = _HeadStart(5.0)
         bank.feed(FRAME, 1.0)
-        bank.shorten_for(int(1.2 * CHARS_PER_SECOND / ASSUMED_DEFICIT))
+        bank.shorten_for(1.2 / ASSUMED_DEFICIT)
         assert bank.feed(FRAME, 0.3) != []
 
     def test_a_reply_already_long_enough_opens_at_once(self) -> None:
         bank = _HeadStart(5.0)
         bank.feed(FRAME, 3.0)
-        bank.shorten_for(1)
+        bank.shorten_for(1.0)
         assert bank.feed(FRAME, 0.0) != []
 
 

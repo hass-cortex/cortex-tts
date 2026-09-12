@@ -29,9 +29,13 @@ MAX_HEAD_START = 10.0
 # what a reply that long can actually lose: a one-line answer waits a fifth of
 # a second rather than the two seconds a forty-second bulletin needs.
 #
-# Speech runs at roughly this many characters a second — measured on
-# MOSS-TTS-Nano, 173 characters of Chinese rendering as 39.6 s of audio.
-CHARS_PER_SECOND = 4.4
+# Speech runs at roughly this many characters a second, per script. Measured
+# on the Hojo 40M in production: 108 characters of Chinese as 26.6 s, 309 of
+# Latin as 21.1 s. MOSS-TTS-Nano reads Chinese slightly faster (4.4); the
+# slower figure is the safe one, because everything sized from it — the bank
+# below, the request limit — wants to over-estimate rather than under.
+CHARS_PER_SECOND = 4.1
+LATIN_CHARS_PER_SECOND = 14.7
 
 # How far behind playback a streamed model is assumed to fall while sizing
 # that shrink. MOSS measured 1.045x on the development host; a tenth leaves
@@ -54,8 +58,11 @@ ASSUMED_DEFICIT = 0.10
 #     ~55 s (one request)               +17.8%
 #
 # A valley with a cliff on either side. This sits in the flat part of it.
+#
+# It is a limit on the request, not on the batching: a single sentence over it
+# is split at a clause mark rather than sent whole, because a run-on sentence
+# is delivered in one lump and the listener waits out the whole of it.
 MAX_REQUEST_SECONDS = 14.0
-MAX_REQUEST_CHARS = int(MAX_REQUEST_SECONDS * CHARS_PER_SECOND)
 
 # One subentry per downloaded model, so each model's options have somewhere to
 # live that the UI already knows how to show. The integration mints them from

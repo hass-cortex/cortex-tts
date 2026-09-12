@@ -13,7 +13,8 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncGenerator
 
-from custom_components.cortex_tts.const import MAX_REQUEST_CHARS
+from custom_components.cortex_tts.const import MAX_REQUEST_SECONDS
+from custom_components.cortex_tts.text import audio_seconds
 from custom_components.cortex_tts.tts import _coalesced
 
 
@@ -94,35 +95,36 @@ class TestReplyLength:
     """
 
     async def test_a_finished_writer_reports_the_whole_reply(self) -> None:
-        ((_, reply_chars),) = await _drain_pairs(_coalesced(_from(["一。", "二。"])))
-        assert reply_chars == len("一。二。")
+        ((_, reply_seconds),) = await _drain_pairs(_coalesced(_from(["一。", "二。"])))
+        assert reply_seconds == audio_seconds("一。二。")
 
     async def test_a_writer_still_going_reports_nothing(self) -> None:
         pairs = await _drain_pairs(
             _coalesced(_from(["一。", "二。", "三。"], pause=0.02))
         )
-        assert [chars for _, chars in pairs[:-1]] == [0, 0]
+        assert [length for _, length in pairs[:-1]] == [0, 0]
 
     async def test_the_length_covers_batches_not_yet_sent(self) -> None:
         """A capped reply is several requests; the length is still the total."""
         sentences = ["甲" * 40 + "。", "乙" * 40 + "。", "丙" * 40 + "。"]
         pairs = await _drain_pairs(_coalesced(_from(sentences)))
         assert len(pairs) > 1, "the cap did not split this"
-        assert pairs[0][1] == sum(len(s) for s in sentences)
+        assert pairs[0][1] == sum(audio_seconds(s) for s in sentences)
 
 
 class TestRequestCap:
-    """No request may carry more than `MAX_REQUEST_CHARS` of text.
+    """No request may carry more than `MAX_REQUEST_SECONDS` of audio.
 
     Past that the model's attention over its own output costs more than the
-    prefill that batching saves.
+    prefill that batching saves, and the listener waits out the whole of a
+    request before any of it arrives.
     """
 
     async def test_a_long_reply_is_split(self) -> None:
         sentences = ["甲" * 40 + "。"] * 4
         batches = await _drain(_coalesced(_from(sentences)))
         assert len(batches) > 1
-        assert all(len(batch) <= MAX_REQUEST_CHARS for batch in batches)
+        assert all(audio_seconds(b) <= MAX_REQUEST_SECONDS for b in batches)
 
     async def test_nothing_is_lost_or_reordered_by_the_split(self) -> None:
         sentences = [f"第{i}句。" * 8 for i in range(6)]
@@ -135,12 +137,14 @@ class TestRequestCap:
             "一。二。三。"
         ]
 
-    async def test_a_single_sentence_over_the_cap_goes_alone(self) -> None:
-        """It has nowhere smaller to go, and must not be dropped or split."""
-        huge = "長" * (MAX_REQUEST_CHARS * 3) + "。"
+    async def test_an_oversized_piece_goes_alone(self) -> None:
+        """Splitting a run-on belongs to the sentence source, not here: a
+        piece that arrives over the limit is text nothing could cut, and it
+        still has to be spoken rather than dropped."""
+        huge = "長" * 200 + "。"
         assert await _drain(_coalesced(_from([huge]))) == [huge]
 
-    async def test_an_oversized_sentence_does_not_swallow_the_next(self) -> None:
-        huge = "長" * (MAX_REQUEST_CHARS * 2) + "。"
+    async def test_an_oversized_piece_does_not_swallow_the_next(self) -> None:
+        huge = "長" * 200 + "。"
         batches = await _drain(_coalesced(_from([huge, "短。"])))
         assert batches == [huge, "短。"]
