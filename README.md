@@ -110,7 +110,7 @@ diagnostic sensors describing the reply it spoke most recently:
 | **Real-time factor**    | `sensor.<model>_real_time_factor`     | —    | Synthesis time over audio length; below 1 outruns playback                                                            |
 | **Last text length**    | `sensor.<model>_last_text_length`     | —    | Characters in the reply                                                                                               |
 | **Playback margin**     | `sensor.<model>_playback_margin`      | s    | The least audio the listener still held when a piece of the reply arrived; negative means it had run dry             |
-| **Last synthesis mode** | `sensor.<model>_last_synthesis_mode`  | —    | `Buffered`, `Sentence by sentence` or `Coalesced`                                                                     |
+| **Last synthesis mode** | `sensor.<model>_last_synthesis_mode`  | —    | `Buffered`, `Sentence by sentence` or `Sentences in groups` — the setting the reply began under                       |
 
 `<model>` is the slug of the model name, as in the TTS entity id. The margin
 is measured only on a reply that arrived in more than one piece — a buffered
@@ -219,8 +219,8 @@ added here — it appears by being downloaded in the app.
 
 | Setting           | Default    | Meaning                                                                                                                                                                                                                                                                                                                                                                       |
 | ----------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Speaking mode** | `Buffered` | `Buffered` renders the whole reply, then plays it — the longest wait, and it never stalls. `Sentence by sentence` sends each finished sentence on its own. `Sentence by sentence, coalesced` does the same but sends together whatever arrived while the previous request was still being spoken, which removes the pause at each sentence boundary.                         |
-| **Head start**    | `0` s      | Seconds of audio to bank before a streamed reply begins playing, up to 10. A model that renders slower than its audio plays falls behind for the whole reply and never catches up; this hands it the difference in advance. Paid on time to first audio, and a coalesced reply whose full length is known before the first request is charged only what a reply that long can lose. |
+| **Speaking mode** | `Buffered` | `Buffered` renders the whole reply, then plays it — the longest wait, and it never stalls. `Sentence by sentence` speaks each sentence as it is finished: the quickest first word, with a join between every sentence. `Sentences in groups` sends together whatever was written while the last request was still rendering, so there are fewer joins — on a model that emits audio while a request is still rendering that removes the pauses outright, and on one that returns each request whole it trades several short waits for fewer longer ones.                         |
+| **Head start**    | `0` s      | Seconds of audio to bank before a streamed reply begins playing, up to 10. A model that renders slower than its audio plays falls behind for the whole reply and never catches up; this hands it the difference in advance. Paid on time to first audio, and a grouped reply whose full length is known before the first request is charged only what a reply that long can lose. It banks by the audio it has received, so it is only a lever on a model that emits audio while a request is still rendering — the Hojo models return each request whole, and a bank smaller than the first request is already full when it arrives. |
 
 A change applies to the next reply; nothing reloads.
 
@@ -228,7 +228,7 @@ A change applies to the next reply; nothing reloads.
 the catalog's speed figure to decide for you: that figure was measured on
 whichever machine added the model, and it does not predict yours. Use the
 model for a while, read `sensor.<model>_real_time_factor`, and switch to
-coalesced if it sits comfortably under **0.5**; then watch
+sentences in groups if it sits comfortably under **0.5**; then watch
 `sensor.<model>_playback_margin`. The reasoning, the measurements and what to
 do when the margin goes negative are in [Keeping up][streaming].
 
@@ -258,7 +258,7 @@ trouble.
 Each model's **Last synthesis mode** sensor reports the mode the model was set
 to when the reply began. Home Assistant routes every reply through that mode —
 a whole message handed to `tts.speak` included, which it wraps as a one-item
-stream — so a model set to coalesced speaks announcements the coalesced way too.
+stream — so a model set to sentences in groups speaks announcements that way too.
 
 ### Talking to the app
 
