@@ -108,9 +108,9 @@ DESCRIPTIONS: tuple[CortexSensorDescription, ...] = (
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda stats: stats.characters,
     ),
-    # The two halves of "did it play smoothly". The margin is this side's
-    # answer — it cannot be rescued downstream. The gap is what a consumer
-    # with a small buffer trips over even when the margin is fine.
+    # "Did it play smoothly", as far as this side can answer it: a negative
+    # margin is audio that did not exist yet, which nothing downstream can
+    # rescue.
     CortexSensorDescription(
         key="margin_seconds",
         translation_key="margin_seconds",
@@ -121,18 +121,6 @@ DESCRIPTIONS: tuple[CortexSensorDescription, ...] = (
         suggested_display_precision=2,
         value_fn=lambda stats: (
             None if stats.margin_seconds is None else round(stats.margin_seconds, 2)
-        ),
-    ),
-    CortexSensorDescription(
-        key="longest_gap_ms",
-        translation_key="longest_gap_ms",
-        device_class=SensorDeviceClass.DURATION,
-        native_unit_of_measurement=UnitOfTime.MILLISECONDS,
-        state_class=SensorStateClass.MEASUREMENT,
-        entity_category=EntityCategory.DIAGNOSTIC,
-        suggested_display_precision=0,
-        value_fn=lambda stats: (
-            None if stats.longest_gap_ms is None else round(stats.longest_gap_ms, 1)
         ),
     ),
     # The mode the reply was spoken in, which is the subentry's setting at

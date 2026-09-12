@@ -99,7 +99,7 @@ so a Chinese voice is the only thing that makes it read Chinese.
 
 One **TTS entity** per downloaded model, named after the model — with three
 models downloaded that is `tts.hojo_tts_light_40m`,
-`tts.hojo_tts_light_80m_voice_cloning` and `tts.moss_tts_nano` — plus eight
+`tts.hojo_tts_light_80m_voice_cloning` and `tts.moss_tts_nano` — plus seven
 diagnostic sensors describing the reply it spoke most recently:
 
 | Sensor                  | Entity id                             | Unit | What it says                                                                                                          |
@@ -109,13 +109,13 @@ diagnostic sensors describing the reply it spoke most recently:
 | **Last audio length**   | `sensor.<model>_last_audio_length`    | s    | How long the reply plays for                                                                                          |
 | **Real-time factor**    | `sensor.<model>_real_time_factor`     | —    | Synthesis time over audio length; below 1 outruns playback                                                            |
 | **Last text length**    | `sensor.<model>_last_text_length`     | —    | Characters in the reply                                                                                               |
-| **Playback margin**     | `sensor.<model>_playback_margin`      | s    | The smallest lead the listener ever had; negative means the audio did not exist yet when it was due                   |
-| **Longest delivery gap**| `sensor.<model>_longest_delivery_gap` | ms   | The longest the stream sent nothing — what a player with a small buffer trips over                                    |
+| **Playback margin**     | `sensor.<model>_playback_margin`      | s    | The least audio the listener still held when a piece of the reply arrived; negative means it had run dry             |
 | **Last synthesis mode** | `sensor.<model>_last_synthesis_mode`  | —    | `Buffered`, `Sentence by sentence` or `Coalesced`                                                                     |
 
 `<model>` is the slug of the model name, as in the TTS entity id. The margin
-and the gap are measured only on a streamed reply; a buffered one leaves them
-unknown.
+is measured only on a reply that arrived in more than one piece — a buffered
+one, or a streamed one short enough to be handed over whole, leaves it
+unknown, because nothing could arrive late.
 
 They are diagnostic and describe the last reply only, never a running total, so
 two replies are never mixed. All of them clear when a new reply begins: a

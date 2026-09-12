@@ -88,9 +88,6 @@
       },
       "margin_seconds": {
         "name": "Playback margin"
-      },
-      "longest_gap_ms": {
-        "name": "Longest delivery gap"
       }
     }
   },

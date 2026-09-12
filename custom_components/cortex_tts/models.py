@@ -82,17 +82,14 @@ class SpeechStats:
     language: str = ""
     voice: str = ""
     margin_seconds: float | None = None
-    """The smallest lead the listener ever had, in seconds of audio.
+    """The least audio the listener still held, in seconds, when a chunk of
+    the reply arrived.
 
-    Starts at the head start and falls whenever rendering is slower than
+    Opens at the head start and falls whenever rendering is slower than
     playback. Negative means this side ran dry: no downstream buffer could
     have covered it, because the audio did not exist yet. Positive means it
-    did not, and a stutter the listener heard came from somewhere else."""
-    longest_gap_ms: float | None = None
-    """The longest the stream went without sending anything.
-
-    A consumer with a small buffer stutters on this even while the margin
-    above stays healthy, so the two answer different questions."""
+    did not, and a stutter the listener heard came from somewhere else. A
+    reply delivered in one piece never had a late chunk, so it stays None."""
     mode: str = STREAM_BUFFERED
     """How this reply reached the speaker — one of `STREAM_MODES`. The mode
     the model was set to when the reply began; Home Assistant routes every

@@ -177,38 +177,35 @@ class _HeadStart:
 class _Delivery:
     """Watches a stream go out, so "was it smooth" stops being an opinion.
 
-    Two numbers, because two different things make a reply stutter and only
-    one of them is ours. `margin` is how many seconds of audio the listener
-    was ahead by, starting at the head start and falling whenever rendering
-    runs slower than playback — if it reaches zero the audio did not exist
-    yet and no downstream buffer could have helped. `longest_gap` is the
-    longest the stream sent nothing, which a consumer with a small buffer
-    trips over even while the margin is healthy.
+    `margin` is the least audio a listener still held, in seconds: everything
+    sent before a chunk, minus everything played since the first chunk
+    started the reply. It opens at the banked head start and falls whenever
+    rendering runs slower than playback. Negative means the listener ran dry
+    — the samples did not exist yet, and no downstream buffer could have
+    covered it.
+
+    The arriving chunk is not counted as held, because audio arriving now
+    cannot fill a silence that has already been heard.
     """
 
-    __slots__ = ("_started", "_last", "_audio", "margin", "longest_gap")
+    __slots__ = ("_started", "_audio", "margin")
 
     def __init__(self) -> None:
         self._started: float | None = None
-        self._last = 0.0
         self._audio = 0.0
         self.margin: float | None = None
-        self.longest_gap: float | None = None
-        """Unmeasured until a second send exists to measure a gap before."""
+        """Unmeasured until a second chunk exists to arrive late."""
 
     def sent(self, seconds: float) -> None:
         """Record that this much audio has now left."""
         now = time.perf_counter()
         if self._started is None:
-            self._started = self._last = now
+            # Playback starts here, so nothing has been consumed yet.
+            self._started = now
         else:
-            self.longest_gap = max(self.longest_gap or 0.0, now - self._last)
-            self._last = now
+            lead = self._audio - (now - self._started)
+            self.margin = lead if self.margin is None else min(self.margin, lead)
         self._audio += seconds
-        elapsed = now - self._started
-        # What a player that started on the first byte would have left.
-        lead = self._audio - elapsed
-        self.margin = lead if self.margin is None else min(self.margin, lead)
 
 
 async def _coalesced(sentences: AsyncIterator[str]) -> AsyncGenerator[tuple[str, int]]:
@@ -607,16 +604,11 @@ class CortexTTSEntity(TextToSpeechEntity):
                 voice=str(voice or ""),
                 mode=mode,
                 margin_seconds=delivery.margin,
-                longest_gap_ms=(
-                    None
-                    if delivery.longest_gap is None
-                    else delivery.longest_gap * 1000
-                ),
             )
         )
         _LOGGER.debug(
             "%s %d chars on %s in %d request(s) as %.2fs of audio in %.0fms "
-            "(RTF %.2f, first %.0fms, margin %+.2fs, longest gap %.0fms)",
+            "(RTF %.2f, first %.0fms, margin %+.2fs)",
             mode,
             characters,
             self._model.id,
@@ -626,5 +618,4 @@ class CortexTTSEntity(TextToSpeechEntity):
             _rtf(elapsed_ms, audio_seconds),
             first_audio_ms,
             delivery.margin if delivery.margin is not None else 0.0,
-            (delivery.longest_gap or 0.0) * 1000,
         )
