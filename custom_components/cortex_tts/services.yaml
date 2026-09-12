@@ -1,10 +1,5 @@
 list_voices:
   fields:
-    model:
-      required: false
-      example: moss-nano
-      selector:
-        text:
     entity_id:
       required: false
       example: tts.moss_tts_nano

@@ -169,14 +169,18 @@ This integration adds an action that can:
 ```yaml
 action: cortex_tts.list_voices
 data:
-  model: moss-nano          # optional; omit for every model
+  entity_id: tts.moss_tts_nano   # optional; omit for every voice
 response_variable: result
 ```
 
-Pass `model` for one model's voices, or `entity_id` for the model behind one
-entity — one or the other, not both. Naming a model or entity this server does
-not have is an error rather than an empty list, because an empty list would
-read as "this model has no voices", which is a different problem.
+Pass the entity you are going to speak through and the answer is the voices
+that entity accepts — the model's, on its own server. Omit it and the answer
+covers every model on every configured server, which is the question to ask
+when you are choosing an entity rather than a voice.
+
+Naming an entity whose server is not loaded, or whose model that server has
+since dropped, is an error rather than an empty list: an empty list would read
+as "this model has no voices", which is a different problem.
 
 The response is `{voices: [...], count}`. Each voice holds `{voice, name,
 language, gender, source, model, model_name}`. `source` separates a bundled

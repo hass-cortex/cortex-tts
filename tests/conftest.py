@@ -18,6 +18,8 @@ from typing import Any
 from unittest.mock import MagicMock
 from uuid import uuid4
 
+import voluptuous as vol
+
 
 def _module(name: str, **attrs: Any) -> ModuleType:
     """Register a stand-in module and return it."""
@@ -106,7 +108,19 @@ class _UnitOfTime(StrEnum):
     SECONDS = "s"
 
 
-_module("homeassistant.const", EntityCategory=_EntityCategory, UnitOfTime=_UnitOfTime)
+class _Platform(StrEnum):
+    """Only the platforms this integration forwards to."""
+
+    SENSOR = "sensor"
+    TTS = "tts"
+
+
+_module(
+    "homeassistant.const",
+    EntityCategory=_EntityCategory,
+    Platform=_Platform,
+    UnitOfTime=_UnitOfTime,
+)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -146,13 +160,25 @@ _module(
     ConfigEntryNotReady=sys.modules["homeassistant.exceptions"].ConfigEntryNotReady,
 )
 
+
+def _entity_domain(domain: str):
+    """Core's `cv.entity_domain`: one entity id, and in `domain`."""
+
+    def validate(value: Any) -> str:
+        if not isinstance(value, str) or value.split(".")[0] != domain:
+            raise vol.Invalid(f"Expected an entity in domain {domain}, got {value!r}")
+        return value
+
+    return validate
+
+
 _module("homeassistant.helpers")
 _module(
     "homeassistant.helpers.config_validation",
     config_entry_only_config_schema=lambda domain: {},
     string=str,
     entity_id=str,
-    has_at_most_one_key=lambda *keys: lambda value: value,
+    entity_domain=_entity_domain,
 )
 _module("homeassistant.helpers.typing", ConfigType=dict, StateType=object)
 _module("homeassistant.helpers.aiohttp_client", async_get_clientsession=MagicMock())

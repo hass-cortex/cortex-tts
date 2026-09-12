@@ -10,9 +10,11 @@ minutes later.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
+import yaml
 
 from custom_components.cortex_tts.config_flow import ModelSubentryFlow
 from custom_components.cortex_tts.const import CONF_STREAM_MODE, STREAM_MODES
@@ -72,6 +74,37 @@ class TestSubentryFlow:
     def test_the_field_has_a_label(self) -> None:
         step = STRINGS["config_subentries"]["model"]["step"]["reconfigure"]
         assert CONF_STREAM_MODE in step["data"]
+
+
+class TestServiceWords:
+    """`services.yaml` declares the fields; `strings.json` names them.
+
+    Two files, one list, and neither imports the other: a field renamed in one
+    renders in the UI as its raw slug, with no label and no description.
+    """
+
+    SERVICES = yaml.safe_load((ROOT / "services.yaml").read_text(encoding="utf-8"))
+
+    @pytest.mark.parametrize("service", SERVICES)
+    def test_every_service_and_field_has_words(self, service: str) -> None:
+        described = STRINGS["services"][service]
+        assert described["name"] and described["description"]
+        for field in self.SERVICES[service].get("fields", {}):
+            assert described["fields"][field]["name"]
+            assert described["fields"][field]["description"]
+
+    @pytest.mark.parametrize("service", SERVICES)
+    def test_no_field_string_is_left_over(self, service: str) -> None:
+        """A removed field leaves a label behind, describing nothing."""
+        declared = set(self.SERVICES[service].get("fields", {}))
+        assert set(STRINGS["services"][service]["fields"]) == declared
+
+    def test_every_refusal_the_service_raises_has_a_sentence(self) -> None:
+        """Otherwise the dialog shows the raw key, and nothing logs."""
+        source = (ROOT / "services.py").read_text(encoding="utf-8")
+        raised = set(re.findall(r'translation_key="([^"]+)"', source))
+        assert raised
+        assert raised <= set(STRINGS["exceptions"])
 
 
 class TestStreamModeWords:

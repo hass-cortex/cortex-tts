@@ -49,10 +49,13 @@
       "message": "Cortex TTS could not speak that message: {error}"
     },
     "unknown_model": {
-      "message": "No model {model} on this server. It has: {known}."
+      "message": "The Cortex TTS server behind {entity_id} no longer has the model {model}. It has: {known}."
     },
     "unknown_entity": {
       "message": "{entity_id} is not a Cortex TTS entity."
+    },
+    "entry_not_loaded": {
+      "message": "The Cortex TTS server behind {entity_id} is not loaded."
     },
     "unsupported_api": {
       "message": "The Cortex TTS app speaks a different API version than this integration; update whichever is older."
@@ -129,15 +132,11 @@
   "services": {
     "list_voices": {
       "name": "List voices",
-      "description": "Return every voice this server offers, with the id `tts.speak` needs. Home Assistant lists voices only to the dashboard, so this is how an automation, a template or an agent finds one.",
+      "description": "Return every voice the configured Cortex TTS servers offer, with the id `tts.speak` needs. Home Assistant lists voices only to the dashboard, so this is how an automation, a template or an agent finds one.",
       "fields": {
-        "model": {
-          "name": "Model",
-          "description": "Only this model's voices, e.g. moss-nano."
-        },
         "entity_id": {
           "name": "Entity",
-          "description": "Only the voices of the model this entity speaks with."
+          "description": "Only the voices of the model this entity speaks with. Omit it for every voice on every server."
         }
       }
     }
