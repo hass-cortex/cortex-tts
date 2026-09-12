@@ -123,6 +123,15 @@ DESCRIPTIONS: tuple[CortexSensorDescription, ...] = (
             None if stats.margin_seconds is None else round(stats.margin_seconds, 2)
         ),
     ),
+    # What the mode above only states the intent of: one request is one
+    # request, whatever the reply was routed as.
+    CortexSensorDescription(
+        key="requests",
+        translation_key="requests",
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda stats: stats.requests or None,
+    ),
     # The mode the reply was spoken in, which is the subentry's setting at
     # the moment it began — a message handed over whole goes through it too.
     CortexSensorDescription(

@@ -94,6 +94,10 @@ class SpeechStats:
     """How this reply reached the speaker — one of `STREAM_MODES`. The mode
     the model was set to when the reply began; Home Assistant routes every
     reply through it, a message handed over whole included."""
+    requests: int = 0
+    """How many times the server was asked, which is the shape the mode
+    above only describes the intent of: a single-sentence reply spoken in
+    groups is one group of one, and reads no differently from buffered."""
 
 
 @dataclass

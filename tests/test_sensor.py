@@ -135,3 +135,27 @@ class TestUnmeasuredIsNotZero:
     def test_counts_and_words_are_untouched(self) -> None:
         """Zero characters is a real answer; the rule is only for durations."""
         assert _BY_KEY["characters"].value_fn(SpeechStats(success=True)) == 0
+
+    def test_no_request_at_all_is_not_a_request(self) -> None:
+        """Unlike characters, zero requests cannot have produced a reply."""
+        assert _BY_KEY["requests"].value_fn(SpeechStats(success=True)) is None
+
+
+class TestRequests:
+    """What the mode sensor cannot say: whether the grouping grouped anything.
+
+    Measured over 308 production voice replies, 70% were a single sentence.
+    Each of those is one request however the model is set, and the mode alone
+    reads as though several went out.
+    """
+
+    def test_a_single_piece_reply_says_one(self) -> None:
+        stats = _stats(mode="coalesced", requests=1)
+        assert _BY_KEY["requests"].value_fn(stats) == 1
+        assert _BY_KEY["mode"].value_fn(stats) == "coalesced"
+
+    def test_a_grouped_reply_says_how_many(self) -> None:
+        assert _BY_KEY["requests"].value_fn(_stats(requests=4)) == 4
+
+    def test_it_is_a_count_of_this_reply_only(self) -> None:
+        assert _BY_KEY["requests"].state_class is SensorStateClass.MEASUREMENT

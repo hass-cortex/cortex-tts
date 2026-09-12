@@ -78,6 +78,9 @@
       "characters": {
         "name": "Last text length"
       },
+      "requests": {
+        "name": "Requests"
+      },
       "mode": {
         "name": "Last synthesis mode",
         "state": {

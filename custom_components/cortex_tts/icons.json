@@ -6,6 +6,9 @@
       }
     },
     "sensor": {
+      "requests": {
+        "default": "mdi:counter"
+      },
       "mode": {
         "default": "mdi:broadcast",
         "state": {

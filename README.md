@@ -99,7 +99,7 @@ so a Chinese voice is the only thing that makes it read Chinese.
 
 One **TTS entity** per downloaded model, named after the model — with three
 models downloaded that is `tts.hojo_tts_light_40m`,
-`tts.hojo_tts_light_80m_voice_cloning` and `tts.moss_tts_nano` — plus seven
+`tts.hojo_tts_light_80m_voice_cloning` and `tts.moss_tts_nano` — plus eight
 diagnostic sensors describing the reply it spoke most recently:
 
 | Sensor                  | Entity id                             | Unit | What it says                                                                                                          |
@@ -110,7 +110,8 @@ diagnostic sensors describing the reply it spoke most recently:
 | **Real-time factor**    | `sensor.<model>_real_time_factor`     | —    | Synthesis time over audio length; below 1 outruns playback                                                            |
 | **Last text length**    | `sensor.<model>_last_text_length`     | —    | Characters in the reply                                                                                               |
 | **Playback margin**     | `sensor.<model>_playback_margin`      | s    | The least audio the listener still held when a piece of the reply arrived; negative means it had run dry             |
-| **Last synthesis mode** | `sensor.<model>_last_synthesis_mode`  | —    | `Buffered`, `Sentence by sentence` or `Sentences in groups` — the setting the reply began under                       |
+| **Requests**            | `sensor.<model>_requests`             | —    | How many times the server was asked for this reply — one, whatever the mode, when there was nothing to group          |
+| **Last synthesis mode** | `sensor.<model>_last_synthesis_mode`  | —    | `Buffered`, `Sentence by sentence` or `Sentences in groups` — the setting the reply began under, not the shape it came out in |
 
 `<model>` is the slug of the model name, as in the TTS entity id. The margin
 is measured only on a reply that arrived in more than one piece — a buffered

@@ -455,6 +455,7 @@ class CortexTTSEntity(TextToSpeechEntity):
                 language=language,
                 voice=str(options.get(ATTR_VOICE) or ""),
                 mode=STREAM_BUFFERED,
+                requests=1,
             )
         )
         _LOGGER.debug(
@@ -617,6 +618,7 @@ class CortexTTSEntity(TextToSpeechEntity):
                 language=request.language,
                 voice=str(voice or ""),
                 mode=mode,
+                requests=sent,
                 margin_seconds=delivery.margin,
             )
         )
