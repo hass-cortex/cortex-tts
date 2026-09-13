@@ -7,7 +7,7 @@ import contextlib
 import logging
 import time
 from collections.abc import AsyncGenerator, AsyncIterator
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict
 
 import aiohttp
 from homeassistant.components.tts import (
@@ -30,6 +30,7 @@ from .const import (
     ASSUMED_DEFICIT,
     CONF_CONVERT_SCRIPT,
     CONF_NORMALIZE_TEXT,
+    CONF_STYLE_INSTRUCTION,
     DOMAIN,
     FIRST_AUDIO_FIELDS,
     MAX_REQUEST_SECONDS,
@@ -282,6 +283,15 @@ async def _coalesced(
             await reader
 
 
+class SpeakFields(TypedDict):
+    """Everything a synthesis request carries beyond text, model and voice."""
+
+    normalize_text: bool
+    convert_script: bool
+    spoken_language: str | None
+    instruct: str | None
+
+
 class CortexTTSEntity(TextToSpeechEntity):
     """A voice backed by one Cortex TTS model."""
 
@@ -312,6 +322,10 @@ class CortexTTSEntity(TextToSpeechEntity):
         self._attr_name = model.name
         self._attr_supported_languages = _expand_languages(model.languages)
         self._attr_default_language = _default_language(self._attr_supported_languages)
+        # Declared per model, not per integration: Home Assistant refuses an
+        # option an entity has not declared, and offering one the server would
+        # then reject with NO_LANGUAGE_CHOICE would move the error a step
+        # further from the person who wrote the automation.
         self._attr_supported_options = [
             ATTR_VOICE,
             ATTR_AUDIO_OUTPUT,
@@ -319,6 +333,8 @@ class CortexTTSEntity(TextToSpeechEntity):
             CONF_NORMALIZE_TEXT,
             CONF_CONVERT_SCRIPT,
         ]
+        if model.style_instruction:
+            self._attr_supported_options.append(CONF_STYLE_INSTRUCTION)
         self._attr_device_info = device_for(config_entry.entry_id, model)
 
     @property
@@ -329,18 +345,33 @@ class CortexTTSEntity(TextToSpeechEntity):
     def async_get_supported_voices(self, language: str) -> list[Voice] | None:
         """Return voices for a language.
 
-        A cloned voice is filtered like any other, because the language it
-        declares is the language of the recording behind it, and picking the
-        voice is picking the language — no model here takes one as a parameter.
-        A voice that declares nothing is offered everywhere rather than hidden.
+        A voice that declares none is offered everywhere rather than hidden:
+        it reads whatever it is given.
+
+        Where the model has no voice in the language, what to do depends on
+        whether it can be told one. A model whose voice decides the language
+        has nothing to offer, and says so. One that takes a language
+        parameter offers all of them instead: Qwen3-TTS reads ten languages
+        with nine speakers, so German names no voice of its own and is still
+        a sensible request — there the timbre and the language are separate
+        things, and narrowing to nothing would leave the picker empty on a
+        language the entity declares it supports.
         """
+
+        def offer(voices: list[VoiceInfo]) -> list[Voice]:
+            return [Voice(voice_id=v.id, name=v.name) for v in voices]
+
         base = language.split("-")[0].lower()
         matching = [
-            Voice(voice_id=voice.id, name=voice.name)
+            voice
             for voice in self._voices
             if voice.language is None or voice.language.lower() == base
         ]
-        return matching or None
+        if matching:
+            return offer(matching)
+        if self._model.language_choice and self._voices:
+            return offer(self._voices)
+        return None
 
     def async_supports_streaming_input(self) -> bool:
         """Return whether this model should speak before the reply is finished.
@@ -389,6 +420,52 @@ class CortexTTSEntity(TextToSpeechEntity):
             translation_placeholders={"error": str(err)},
         )
 
+    def _delivery_options(
+        self, language: str, options: dict[str, Any]
+    ) -> dict[str, str | None]:
+        """Return what to tell the model beyond the voice.
+
+        The language is Home Assistant's own — the pipeline's, which is the
+        language of the text, which is what the model has to be told. There is
+        no separate option for it: a second one would have to mean something
+        different from "what language is this", and nothing does. Sent only to
+        models that take one; the rest let the voice decide and would refuse it.
+
+        Absent rather than empty when unset: the server reads "" as a request
+        for something.
+        """
+        instruct = (
+            options.get(CONF_STYLE_INSTRUCTION)
+            if self._model.style_instruction
+            else None
+        )
+        # Whole, not reduced to `zh`: how much of a tag means anything is the
+        # model's to say, and one of them names Chinese dialects while another
+        # names 646 languages. The server narrows it against the model's own
+        # list; doing it here would decide for a model that may know better.
+        spoken = language if self._model.language_choice else ""
+        return {
+            "spoken_language": spoken or None,
+            "instruct": str(instruct) if instruct else None,
+        }
+
+    def _speak_fields(self, language: str, options: dict[str, Any]) -> SpeakFields:
+        """The two text switches and the two delivery fields, as one set.
+
+        One structure rather than two dicts merged at the call site: their
+        values are of different types, so merging them loses both — every
+        keyword then reads as `bool | str | None`, and `normalize_text` will
+        take a string as far as the checker knows.
+        """
+        text = self._text_options(language, options)
+        delivery = self._delivery_options(language, options)
+        return SpeakFields(
+            normalize_text=text["normalize_text"],
+            convert_script=text["convert_script"],
+            spoken_language=delivery["spoken_language"],
+            instruct=delivery["instruct"],
+        )
+
     def _text_options(self, language: str, options: dict[str, Any]) -> dict[str, bool]:
         """Return the two text-pipeline switches for a call.
 
@@ -434,7 +511,7 @@ class CortexTTSEntity(TextToSpeechEntity):
                 model=self._model.id,
                 voice=options.get(ATTR_VOICE),
                 audio_format=audio_format,
-                **self._text_options(language, options),
+                **self._speak_fields(language, options),
             )
         except CortexTTSError as err:
             raise self._failed(err, language, "synthesis_failed") from err
@@ -488,7 +565,7 @@ class CortexTTSEntity(TextToSpeechEntity):
         everything that arrived while the last request was still streaming.
         """
         detector = SentenceBoundaryDetector()
-        text_options = self._text_options(request.language, request.options)
+        fields = self._speak_fields(request.language, request.options)
         voice = request.options.get(ATTR_VOICE)
         produced = False
         characters = 0
@@ -548,7 +625,7 @@ class CortexTTSEntity(TextToSpeechEntity):
                     text,
                     model=self._model.id,
                     voice=voice,
-                    **text_options,
+                    **fields,
                 ):
                     produced = True
                     # A constant bitrate is what turns a byte count into a

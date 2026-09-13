@@ -30,11 +30,12 @@ class VoiceInfo:
         id: Identifier to send back in a synthesis request.
         name: Label shown in the Home Assistant voice picker.
         language: Base language code, or ``None`` when the voice declares
-            none. A reference recording always declares one — it is chosen on
-            upload — so in practice the ``None`` case is a built-in voice whose
-            id the bundle's reader could not classify.
+            none — a designed voice, which reads whatever it is given. A
+            reference recording always declares one, chosen on upload, and it
+            describes the recording rather than what the voice may be asked
+            to read.
         gender: ``female``, ``male`` or ``unknown``.
-        source: ``builtin`` or ``reference``.
+        source: ``builtin``, ``designed`` or ``reference``.
     """
 
     id: str
@@ -58,8 +59,14 @@ class ModelInfo:
     sample_rate: int
     downloaded: bool
     loaded: bool
-    rtf_hint: float = 0.0
-    """The catalog's relative cost figure, 0.0 when the server reports none."""
+    language_choice: bool = False
+    """Whether the server takes a language for this model, or the voice decides.
+
+    Defaulting to False is the safe direction: the entity then offers no such
+    option, and an older server that does not report the field cannot have one
+    sent to it."""
+    style_instruction: bool = False
+    """Whether the server takes a plain-language instruction beside the voice."""
 
 
 @dataclass
@@ -149,8 +156,8 @@ def model_from_unique_id(entry_id: str, unique_id: str) -> str | None:
 def default_stream_mode() -> str:
     """How a model speaks until someone chooses for it: buffered, always.
 
-    Takes no model on purpose: the catalog's `rtf_hint` is measured on another
-    machine and does not predict this one.
+    Takes no model on purpose: nothing published about a model predicts this
+    host.
     """
     return STREAM_BUFFERED
 

@@ -50,8 +50,9 @@ def _voice_out(voice: VoiceInfo, model: ModelInfo) -> dict[str, object]:
         "name": voice.name,
         "language": voice.language,
         "gender": voice.gender,
-        # `builtin` ships with the model; `reference` is a recording someone
-        # uploaded, and is the same voice on every model that can clone.
+        # `builtin` ships with the model, `designed` is built from a fixed
+        # attribute set, `reference` is a recording someone uploaded — and
+        # that last one is the same voice on every model that can clone.
         "source": voice.source,
         "model": model.id,
         "model_name": model.name,

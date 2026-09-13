@@ -18,7 +18,6 @@ def _model(**overrides: object) -> ModelInfo:
         "sample_rate": 24000,
         "downloaded": True,
         "loaded": False,
-        "rtf_hint": 0.21,
     }
     return ModelInfo(**{**base, **overrides})  # type: ignore[arg-type]
 

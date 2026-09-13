@@ -8,6 +8,17 @@ CONF_HOST = "host"
 CONF_API_KEY = "api_key"
 CONF_NORMALIZE_TEXT = "normalize_text"
 CONF_CONVERT_SCRIPT = "convert_script"
+
+# A per-call option the server accepts only from the model that declares it,
+# so the entity offers it only where it means something. Home Assistant
+# refuses an option an entity has not declared, and its cache key hashes every
+# option — so a line said angrily is stored apart from the same line said
+# plainly, rather than replayed from it.
+#
+# There is no option for the language: Home Assistant already passes one, and
+# it means the language of the text, which is exactly what the model needs to
+# be told.
+CONF_STYLE_INSTRUCTION = "instruct"
 CONF_STREAM_MODE = "stream_mode"
 CONF_HEAD_START = "head_start"
 
@@ -17,10 +28,9 @@ CONF_HEAD_START = "head_start"
 # at a rate of R, a reply of L seconds needs (R-1) x L. MOSS-TTS-Nano measured
 # 1.045x on the development host, where two seconds covers a 44-second reply.
 #
-# Zero by default. The right value is a property of the host rather than the
-# model — the catalog's `rtf_hint` was measured elsewhere and was out by 3x
-# here — so this is set by whoever can measure it, not guessed from a number
-# that cannot know.
+# Zero by default: the right value is a property of the host, so it is set by
+# whoever can measure it. The server publishes no figure of its own to guess
+# from — it reports only what its own host measured.
 DEFAULT_HEAD_START = 0.0
 MAX_HEAD_START = 10.0
 

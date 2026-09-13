@@ -58,7 +58,8 @@ async def async_get_config_entry_diagnostics(
                 "languages": model.languages,
                 "downloaded": model.downloaded,
                 "loaded": model.loaded,
-                "rtf_hint": model.rtf_hint,
+                "language_choice": model.language_choice,
+                "style_instruction": model.style_instruction,
                 "stream_mode": stream_mode(entry, model),
                 "stream_mode_default": default_stream_mode(),
                 "voices": [

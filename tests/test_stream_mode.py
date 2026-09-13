@@ -29,7 +29,7 @@ from custom_components.cortex_tts.models import (
 )
 
 
-def _model(model_id: str = "moss-nano", rtf_hint: float = 0.35) -> ModelInfo:
+def _model(model_id: str = "moss-nano") -> ModelInfo:
     return ModelInfo(
         id=model_id,
         name=model_id,
@@ -41,7 +41,6 @@ def _model(model_id: str = "moss-nano", rtf_hint: float = 0.35) -> ModelInfo:
         sample_rate=48000,
         downloaded=True,
         loaded=False,
-        rtf_hint=rtf_hint,
     )
 
 

@@ -37,7 +37,6 @@ def _model(model_id: str, name: str) -> ModelInfo:
         sample_rate=24000,
         downloaded=True,
         loaded=False,
-        rtf_hint=0.5,
     )
 
 

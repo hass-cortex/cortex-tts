@@ -7,7 +7,8 @@
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/hass-cortex/cortex-tts)
 
 Home Assistant integration for the [Cortex TTS app][app-repo] — on-device
-text-to-speech over three ONNX models, on your own hardware.
+text-to-speech over whichever of its models you download, on your own
+hardware.
 
 Adds one TTS entity per model downloaded on the server — a model with no
 weights on disk would be a permanently-failing voice in the picker — so every
@@ -24,7 +25,11 @@ diagnostic sensors.
 - **On-device** — synthesis runs on your own hardware through the
   [Cortex TTS app][app-repo]. No cloud, no per-character bill.
 - **One entity per model** — each model downloaded on the server becomes its
-  own TTS entity, with its built-in or cloned voices in the pipeline picker.
+  own TTS entity, with its voices in the pipeline picker: built in, cloned
+  from a recording you uploaded, or designed from a fixed set of attributes.
+- **A style instruction where the model reads one** — Qwen3-TTS takes a
+  plain-language note beside the voice (`用非常生氣的語氣說`), offered as a
+  `tts.speak` option on that entity alone.
 - **Streaming, per model, and off until you ask** — a model that renders
   faster than its audio plays can start on the opening sentences instead of the
   last one. Every model starts buffered; you turn streaming on after your own
@@ -49,7 +54,8 @@ diagnostic sensors.
 - **Cortex TTS app 0.1.0 or newer**, which speaks API version 1. The
   integration reads `api_version` from the app's `/health` and refuses to set
   up with "unsupported API" when the two sides disagree — update whichever is
-  older.
+  older. An app too old to report `style_instruction` simply offers no
+  `instruct` option; nothing else changes.
 
 ## Setup
 
@@ -92,15 +98,17 @@ reachable from outside the Supervisor network, publish 8771 under the app's
 
 [![Open your Home Assistant instance and manage your voice assistants.](https://my.home-assistant.io/badges/voice_assistants.svg)](https://my.home-assistant.io/redirect/voice_assistants/)
 
-The voice is what picks the language: the model takes no language parameter,
-so a Chinese voice is the only thing that makes it read Chinese.
+On most models the voice is what picks the language — a Chinese voice is the
+only thing that makes them read Chinese. Qwen3-TTS and OmniVoice take a
+language of their own, and on those the pipeline's language is sent with every
+reply, so the speaker is a timbre rather than a language.
 
 ## Entities
 
-One **TTS entity** per downloaded model, named after the model — with three
-models downloaded that is `tts.hojo_tts_light_40m`,
-`tts.hojo_tts_light_80m_voice_cloning` and `tts.moss_tts_nano` — plus eight
-diagnostic sensors describing the reply it spoke most recently:
+One **TTS entity** per downloaded model, named after the model —
+`tts.hojo_tts_light_40m`, `tts.moss_tts_nano`, one per Qwen3-TTS checkpoint,
+one for OmniVoice — plus eight diagnostic sensors describing the reply it
+spoke most recently:
 
 | Sensor                  | Entity id                             | Unit | What it says                                                                                                          |
 | ----------------------- | ------------------------------------- | ---- | --------------------------------------------------------------------------------------------------------------------- |
@@ -146,7 +154,11 @@ data:
 
 `language` decides which voices are on offer and sets the default for
 `convert_script`; number expansion stays on either way. The default is the
-first of `zh-TW`, `zh`, `en-US`, `en` the model supports.
+first of `zh-TW`, `zh`, `en-US`, `en` the model supports. On Qwen3-TTS and
+OmniVoice it is also what the model is told to read the text as — whole, as
+`zh-TW` rather than `zh`, because how much of a tag matters is the model's to
+decide. There is no second option for it: this one already means "what
+language is this", which is exactly what the model needs.
 
 `voice` is an id, not a display name, and it belongs to one model — the one
 behind the entity you targeted. A voice from another model is rejected. Omit it
@@ -184,11 +196,13 @@ since dropped, is an error rather than an empty list: an empty list would read
 as "this model has no voices", which is a different problem.
 
 The response is `{voices: [...], count}`. Each voice holds `{voice, name,
-language, gender, source, model, model_name}`. `source` separates a bundled
-voice (`builtin`) from a recording you uploaded (`reference`). `language` is the
-language of the voice, not of the text — a cloned voice declares whichever you
-chose when uploading the recording, and that is what a pipeline filters on,
-because picking the voice is picking the language.
+language, gender, source, model, model_name}`. `source` is one of three:
+`builtin` for a voice shipped with the model, `designed` for one OmniVoice
+builds from a fixed set of attributes, and `reference` for a recording you
+uploaded. `language` is the language of the voice, not of the text — a cloned
+voice declares whichever you chose when uploading the recording — and that is
+what a pipeline filters on. A voice that declares none, as a designed one
+does, is offered for every language.
 
 It is also how a conversation agent picks a voice by description instead of by
 an id nobody remembers.
@@ -202,6 +216,7 @@ an id nobody remembers.
 | `audio_output`     | as above               | Read only when `preferred_format` is absent                                                                                                                                                                                                                                   |
 | `normalize_text`   | `true`                 | Expand numbers, units, dates and clock times, in the script of the text                                                                                                                                                                                                       |
 | `convert_script`   | Chinese languages only | Convert Traditional glyphs to Simplified                                                                                                                                                                                                                                      |
+| `instruct`         | none                   | A plain-language instruction beside the voice — `用非常生氣的語氣說`. Offered **only on Qwen3-TTS 0.6B (built-in voices)**, the one model that reads one; on any other entity Home Assistant refuses the option before the request is sent                                        |
 
 The two text switches exist for a caller whose text is already prepared;
 turning conversion off for ordinary Traditional Chinese makes the voice
@@ -225,9 +240,9 @@ added here — it appears by being downloaded in the app.
 
 A change applies to the next reply; nothing reloads.
 
-**Buffered is the default for every model, deliberately.** Nothing here reads
-the catalog's speed figure to decide for you: that figure was measured on
-whichever machine added the model, and it does not predict yours. Use the
+**Buffered is the default for every model, deliberately.** There is no
+figure to decide for you: a real-time factor belongs to a host, so the app
+carries none and shows only what your own machine has measured. Use the
 model for a while, read `sensor.<model>_real_time_factor`, and switch to
 sentences in groups if it sits comfortably under **0.5**; then watch
 `sensor.<model>_playback_margin`. The reasoning, the measurements and what to
@@ -249,7 +264,10 @@ as Latin punctuation.
 
 A model has to synthesise faster than its audio plays to keep a stream fed; a
 cloning model also has to hold one voice steady across separately synthesised
-sentences, so leave the 80M buffered unless you have listened to it streamed.
+sentences, so leave a cloning model buffered unless you have listened to it
+streamed. Chunk streaming is not a cure for a slow model: Qwen3-TTS emits
+audio mid-sentence and is still the slowest model here, so on a host where it
+renders at several times real time every block arrives later than the last.
 Set a model back to buffered if a media player refuses the stream: a player
 that probes the file before playing — AirPlay targets do — can give up waiting
 for the first bytes of a long reply and fail to open it, while the audio itself
@@ -277,7 +295,7 @@ stream — so a model set to sentences in groups speaks announcements that way t
 ## Troubleshooting
 
 - **No voices in the picker.** The model is not downloaded — the entity only
-  exists once it is — or it is the cloning model with no reference recording
+  exists once it is — or it is a cloning model with no reference recording
   uploaded yet. Both are fixed in the app; the entity list follows in seconds.
 - **The right words, mispronounced or garbled, in Chinese.** `convert_script`
   was turned off for Traditional Chinese text, or the language tag was not a

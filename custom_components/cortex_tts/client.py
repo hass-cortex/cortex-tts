@@ -126,7 +126,8 @@ class CortexTTSClient:
                 sample_rate=item.get("sample_rate", 24000),
                 downloaded=bool(item.get("downloaded")),
                 loaded=bool(item.get("loaded")),
-                rtf_hint=float(item.get("rtf_hint") or 0.0),
+                language_choice=bool(item.get("language_choice", False)),
+                style_instruction=bool(item.get("style_instruction", False)),
             )
             for item in payload
         ]
@@ -163,6 +164,8 @@ class CortexTTSClient:
         audio_format: str = "wav",
         normalize_text: bool = True,
         convert_script: bool = True,
+        spoken_language: str | None = None,
+        instruct: str | None = None,
     ) -> tuple[bytes, dict[str, float]]:
         """Synthesise text.
 
@@ -173,6 +176,10 @@ class CortexTTSClient:
             audio_format: Container to request.
             normalize_text: Expand numbers, units and clock literals.
             convert_script: Convert Traditional Chinese glyphs to Simplified.
+            spoken_language: Which language the model reads the text as, on
+                the models that take one. ``None`` lets the voice decide.
+            instruct: A plain-language instruction beside the voice, on the
+                one model that takes one.
 
         Returns:
             The encoded audio and the server's timing headers.
@@ -180,15 +187,16 @@ class CortexTTSClient:
         Raises:
             CortexTTSError: The server rejected the request.
         """
-        body: dict[str, Any] = {
-            "text": text,
-            "model": model,
-            "format": audio_format,
-            "normalize_text": normalize_text,
-            "convert_script": convert_script,
-        }
-        if voice:
-            body["voice"] = voice
+        body = _speak_body(
+            text,
+            model=model,
+            voice=voice,
+            normalize_text=normalize_text,
+            convert_script=convert_script,
+            spoken_language=spoken_language,
+            instruct=instruct,
+        )
+        body["format"] = audio_format
 
         async with self._session.post(
             f"{self._host}/api/speak",
@@ -213,6 +221,8 @@ class CortexTTSClient:
         voice: str | None,
         normalize_text: bool = True,
         convert_script: bool = True,
+        spoken_language: str | None = None,
+        instruct: str | None = None,
     ) -> AsyncIterator[tuple[int, bytes]]:
         """Synthesise text, yielding audio as the server produces it.
 
@@ -231,15 +241,16 @@ class CortexTTSClient:
                 before any audio does — once the response has started the
                 status is 200, so a later failure surfaces as a short stream.
         """
-        body: dict[str, Any] = {
-            "text": text,
-            "model": model,
-            "format": STREAM_FORMAT,
-            "normalize_text": normalize_text,
-            "convert_script": convert_script,
-        }
-        if voice:
-            body["voice"] = voice
+        body = _speak_body(
+            text,
+            model=model,
+            voice=voice,
+            normalize_text=normalize_text,
+            convert_script=convert_script,
+            spoken_language=spoken_language,
+            instruct=instruct,
+        )
+        body["format"] = STREAM_FORMAT
 
         async with self._session.post(
             f"{self._host}/api/speak/stream",
@@ -287,6 +298,37 @@ async def _error_detail(response: aiohttp.ClientResponse) -> tuple[str, str]:
             str(payload.get("message", response.reason)),
         )
     return "HTTP_ERROR", f"{response.status} {response.reason}"
+
+
+def _speak_body(
+    text: str,
+    *,
+    model: str,
+    voice: str | None,
+    normalize_text: bool,
+    convert_script: bool,
+    spoken_language: str | None,
+    instruct: str | None,
+) -> dict[str, Any]:
+    """Build the request both speak paths send.
+
+    The two optional fields are omitted rather than sent empty: the server
+    refuses one a model does not declare, and "" would be a request for
+    something.
+    """
+    body: dict[str, Any] = {
+        "text": text,
+        "model": model,
+        "normalize_text": normalize_text,
+        "convert_script": convert_script,
+    }
+    if voice:
+        body["voice"] = voice
+    if spoken_language:
+        body["language"] = spoken_language
+    if instruct:
+        body["instruct"] = instruct
+    return body
 
 
 def _header_float(response: aiohttp.ClientResponse, name: str) -> float:
