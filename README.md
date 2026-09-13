@@ -87,6 +87,11 @@ not be published.
 
 [![Open your Home Assistant instance and start setting up this integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=cortex_tts)
 
+Each entry is named after the address it points at — `Cortex TTS
+(local-cortex-tts:8771)`, `Cortex TTS (192.168.10.36:8771)` — so two of them,
+one on the Home Assistant box and one on a machine with a GPU, are told apart
+at a glance.
+
 Container and Core installs have no Supervisor to announce through, so add it
 by hand: the app's address **including the scheme**
 (`http://homeassistant.local:8771`) and the API key from the app's
@@ -146,10 +151,10 @@ target:
   entity_id: tts.hojo_tts_light_40m
 data:
   media_player_entity_id: media_player.living_room_speaker
-  language: en-US
+  language: zh-TW
   options:
-    voice: hojo_en_f_01
-  message: The washing machine is done. It is 26.5°C indoors.
+    voice: hojo_zh_f_02
+  message: 洗衣機洗好了，目前室內溫度 26.5°C。
 ```
 
 `language` decides which voices are on offer and sets the default for
@@ -167,10 +172,9 @@ for the server's default. Every model names its voices differently
 action below lists them.
 
 A message need not end in punctuation, and numbers, units and Traditional
-Chinese are rewritten on the server before synthesis: send Traditional text
-with `language: zh-TW` and a `zh` voice, and the server speaks it as
-Simplified glyphs with every figure written out. [The text pipeline][text]
-shows into what.
+Chinese are rewritten on the server before synthesis — the example above
+reaches the model as Simplified glyphs with both figures written out; [the
+text pipeline][text] shows exactly into what.
 
 Adding `cache: false` to `tts.speak` re-synthesises the same text on every
 call; it is worth it only when the message is different every time.

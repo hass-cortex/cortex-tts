@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import contextlib
 import hashlib
 import logging
 from typing import Any
+from urllib.parse import urlparse
 
-import aiohttp
 import voluptuous as vol
 from homeassistant.config_entries import (
     ConfigEntry,
@@ -29,7 +28,7 @@ from homeassistant.helpers.selector import (
 )
 from homeassistant.helpers.service_info.hassio import HassioServiceInfo
 
-from .client import CortexTTSClient, CortexTTSError
+from .client import CortexTTSClient
 from .const import (
     CONF_API_KEY,
     CONF_HEAD_START,
@@ -55,12 +54,33 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 STEP_REAUTH_SCHEMA = vol.Schema({vol.Required(CONF_API_KEY): str})
 
 
+# What the app serves on unless told otherwise, and what a title falls back
+# to when the address was typed without one.
+DEFAULT_PORT = 8771
+
+
 def normalise_host(host: str) -> str:
     """One spelling per server, so two entries cannot point at the same one."""
     host = host.strip().rstrip("/")
     if "://" not in host:
         host = f"http://{host}"
     return host
+
+
+def server_label(host: str) -> str:
+    """What to call a server in an entry title.
+
+    Host and port, because together they are what differs between two entries
+    and what does not change. The app's version used to go here, read once
+    from `/health` at setup: it named what happened to be running that day,
+    never moved again, and said nothing about which machine — which is the one
+    question a title has to answer as soon as there is more than one server.
+
+    The port is shown even when it is the default, so the title is the address
+    a reader can paste rather than one they have to complete from memory.
+    """
+    parsed = urlparse(normalise_host(host))
+    return f"{parsed.hostname or host}:{parsed.port or DEFAULT_PORT}"
 
 
 class CortexTTSConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
@@ -91,16 +111,6 @@ class CortexTTSConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
         client = CortexTTSClient(host=host, api_key=api_key, session=session)
         return await client.validate(), client
 
-    async def _titled(self, client: CortexTTSClient, base: str) -> str:
-        """Append the server version to a title when it can be read."""
-        with contextlib.suppress(
-            aiohttp.ClientError, TimeoutError, CortexTTSError, KeyError, ValueError
-        ):
-            health = await client.health()
-            if version := health.get("version"):
-                return f"{base} ({version})"
-        return base
-
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
@@ -119,9 +129,8 @@ class CortexTTSConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
                 unique_id = hashlib.sha256(host.encode()).hexdigest()[:16]
                 await self.async_set_unique_id(unique_id)
                 self._abort_if_unique_id_configured()
-                title = await self._titled(client, "Cortex TTS")
                 return self.async_create_entry(
-                    title=title,
+                    title=f"Cortex TTS ({server_label(host)})",
                     data={CONF_HOST: host, CONF_API_KEY: user_input[CONF_API_KEY]},
                 )
 
@@ -192,9 +201,9 @@ class CortexTTSConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
             if error:
                 errors["base"] = error
             else:
-                title = await self._titled(client, discovery.name)
                 return self.async_create_entry(
-                    title=title, data={CONF_HOST: host, CONF_API_KEY: api_key}
+                    title=f"{discovery.name} ({server_label(host)})",
+                    data={CONF_HOST: host, CONF_API_KEY: api_key},
                 )
 
         return self.async_show_form(
