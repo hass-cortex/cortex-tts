@@ -12,7 +12,7 @@ CONF_CONVERT_SCRIPT = "convert_script"
 # A per-call option the server accepts only from the model that declares it,
 # so the entity offers it only where it means something. Home Assistant
 # refuses an option an entity has not declared, and its cache key hashes every
-# option — so a line said angrily is stored apart from the same line said
+# option — so a line said warmly is stored apart from the same line said
 # plainly, rather than replayed from it.
 #
 # There is no option for the language: Home Assistant already passes one, and

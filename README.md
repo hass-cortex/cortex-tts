@@ -28,8 +28,8 @@ diagnostic sensors.
   own TTS entity, with its voices in the pipeline picker: built in, cloned
   from a recording you uploaded, or designed from a fixed set of attributes.
 - **A style instruction where the model reads one** — Qwen3-TTS takes a
-  plain-language note beside the voice (`用非常生氣的語氣說`), offered as a
-  `tts.speak` option on that entity alone.
+  plain-language note beside the voice (`speak slowly, in a warm tone`),
+  offered as a `tts.speak` option on that entity alone.
 - **Streaming, per model, and off until you ask** — a model that renders
   faster than its audio plays can start on the opening sentences instead of the
   last one. Every model starts buffered; you turn streaming on after your own
@@ -146,10 +146,10 @@ target:
   entity_id: tts.hojo_tts_light_40m
 data:
   media_player_entity_id: media_player.living_room_speaker
-  language: zh-TW
+  language: en-US
   options:
-    voice: hojo_zh_f_02
-  message: 洗衣機洗好了，目前室內溫度 26.5°C。
+    voice: hojo_en_f_01
+  message: The washing machine is done. It is 26.5°C indoors.
 ```
 
 `language` decides which voices are on offer and sets the default for
@@ -167,8 +167,10 @@ for the server's default. Every model names its voices differently
 action below lists them.
 
 A message need not end in punctuation, and numbers, units and Traditional
-Chinese are rewritten on the server before synthesis — [the text
-pipeline][text] shows into what.
+Chinese are rewritten on the server before synthesis: send Traditional text
+with `language: zh-TW` and a `zh` voice, and the server speaks it as
+Simplified glyphs with every figure written out. [The text pipeline][text]
+shows into what.
 
 Adding `cache: false` to `tts.speak` re-synthesises the same text on every
 call; it is worth it only when the message is different every time.
@@ -216,7 +218,7 @@ an id nobody remembers.
 | `audio_output`     | as above               | Read only when `preferred_format` is absent                                                                                                                                                                                                                                   |
 | `normalize_text`   | `true`                 | Expand numbers, units, dates and clock times, in the script of the text                                                                                                                                                                                                       |
 | `convert_script`   | Chinese languages only | Convert Traditional glyphs to Simplified                                                                                                                                                                                                                                      |
-| `instruct`         | none                   | A plain-language instruction beside the voice — `用非常生氣的語氣說`. Offered **only on Qwen3-TTS 0.6B (built-in voices)**, the one model that reads one; on any other entity Home Assistant refuses the option before the request is sent                                        |
+| `instruct`         | none                   | A plain-language instruction beside the voice — `speak slowly, in a warm tone`. Offered **only on Qwen3-TTS 0.6B (built-in voices)**, the one model that reads one; on any other entity Home Assistant refuses the option before the request is sent |
 
 The two text switches exist for a caller whose text is already prepared;
 turning conversion off for ordinary Traditional Chinese makes the voice

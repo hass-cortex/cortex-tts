@@ -70,10 +70,10 @@ class TestWhatTheServerIsSent:
             normalize_text=True,
             convert_script=False,
             spoken_language="en",
-            instruct="say it angrily",
+            instruct="speak slowly, in a warm tone",
         )
         assert body["language"] == "en"
-        assert body["instruct"] == "say it angrily"
+        assert body["instruct"] == "speak slowly, in a warm tone"
 
 
 class TestCapabilitiesDefaultToOff:
@@ -116,5 +116,5 @@ class TestTheLanguageComesFromHomeAssistant:
 
     def test_the_instruction_still_travels_separately(self) -> None:
         entity = self._entity(language_choice=True, style_instruction=True)
-        got = entity._delivery_options("zh-TW", {CONF_STYLE_INSTRUCTION: "angrily"})
-        assert got == {"spoken_language": "zh-TW", "instruct": "angrily"}
+        got = entity._delivery_options("zh-TW", {CONF_STYLE_INSTRUCTION: "warmly"})
+        assert got == {"spoken_language": "zh-TW", "instruct": "warmly"}
