@@ -42,7 +42,9 @@ class TestWhatTheServerIsSent:
             model="m",
             voice=None,
             normalize_text=True,
+            expand_numbers=None,
             convert_script=False,
+            taiwan_readings=False,
             spoken_language=None,
             instruct=None,
         )
@@ -55,7 +57,9 @@ class TestWhatTheServerIsSent:
             model="m",
             voice=None,
             normalize_text=True,
+            expand_numbers=None,
             convert_script=False,
+            taiwan_readings=False,
             spoken_language="",
             instruct="",
         )
@@ -68,7 +72,9 @@ class TestWhatTheServerIsSent:
             model="m",
             voice="vivian",
             normalize_text=True,
+            expand_numbers=None,
             convert_script=False,
+            taiwan_readings=False,
             spoken_language="en",
             instruct="speak slowly, in a warm tone",
         )
@@ -110,9 +116,11 @@ class TestTheLanguageComesFromHomeAssistant:
         assert entity._delivery_options("zh-TW", {})["spoken_language"] == "zh-TW"
         assert entity._delivery_options("en-US", {})["spoken_language"] == "en-US"
 
-    def test_a_model_where_the_voice_decides_is_told_nothing(self) -> None:
+    def test_a_model_where_the_voice_decides_still_gets_the_tag(self) -> None:
+        # The server prepares the text in that language on every model, and
+        # only tells the model itself where the model takes one.
         entity = self._entity()
-        assert entity._delivery_options("zh-TW", {})["spoken_language"] is None
+        assert entity._delivery_options("zh-TW", {})["spoken_language"] == "zh-TW"
 
     def test_the_instruction_still_travels_separately(self) -> None:
         entity = self._entity(language_choice=True, style_instruction=True)

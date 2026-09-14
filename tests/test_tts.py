@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from custom_components.cortex_tts.tts import CortexTTSEntity, _expand_languages
 
 
@@ -17,35 +15,31 @@ class TestTextOptions:
     """
 
     @staticmethod
-    def _options(
-        language: str, given: dict[str, object] | None = None
-    ) -> dict[str, bool]:
-        return CortexTTSEntity._text_options(None, language, given or {})  # type: ignore[arg-type]
+    def _options(given: dict[str, object] | None = None) -> dict[str, bool | None]:
+        return CortexTTSEntity._text_options(None, given or {})  # type: ignore[arg-type]
 
-    @pytest.mark.parametrize("language", ["en", "en-US", "en-GB", "de", ""])
-    def test_numbers_are_expanded_whatever_the_language(self, language: str) -> None:
-        assert self._options(language)["normalize_text"] is True
+    def test_numbers_are_expanded_unless_told_otherwise(self) -> None:
+        assert self._options()["normalize_text"] is True
+        assert self._options({"normalize_text": False})["normalize_text"] is False
 
-    @pytest.mark.parametrize("language", ["zh", "zh-TW", "zh-Hant", "ZH-tw"])
-    def test_chinese_also_converts_the_script(self, language: str) -> None:
-        assert self._options(language) == {
+    def test_the_chinese_rewrites_are_left_to_the_server(self) -> None:
+        # The server decides both from the language it is sent — conversion
+        # for any Chinese, Taiwan readings for Taiwan's — so an unset option
+        # travels as absent, never as a default chosen here.
+        assert self._options() == {
             "normalize_text": True,
-            "convert_script": True,
+            "expand_numbers": None,
+            "convert_script": None,
+            "taiwan_readings": None,
         }
 
-    @pytest.mark.parametrize("language", ["en", "en-US", "de"])
-    def test_script_conversion_is_off_outside_chinese(self, language: str) -> None:
-        # Rewriting glyphs into Simplified is meaningless for a Latin voice.
-        assert self._options(language)["convert_script"] is False
+    def test_bare_numbers_travel_only_when_asked(self) -> None:
+        assert self._options({"expand_numbers": True})["expand_numbers"] is True
 
-    def test_an_explicit_option_beats_the_language(self) -> None:
-        assert (
-            self._options("zh-TW", {"convert_script": False})["convert_script"] is False
-        )
-        assert self._options("en", {"convert_script": True})["convert_script"] is True
-        assert (
-            self._options("zh-TW", {"normalize_text": False})["normalize_text"] is False
-        )
+    def test_an_explicit_option_travels_as_set(self) -> None:
+        assert self._options({"convert_script": False})["convert_script"] is False
+        assert self._options({"taiwan_readings": True})["taiwan_readings"] is True
+        assert self._options({"taiwan_readings": False})["taiwan_readings"] is False
 
 
 class TestExpandLanguages:

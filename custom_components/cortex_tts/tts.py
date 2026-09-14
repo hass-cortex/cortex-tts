@@ -29,8 +29,10 @@ from .client import CortexTTSAuthError, CortexTTSClient, CortexTTSError
 from .const import (
     ASSUMED_DEFICIT,
     CONF_CONVERT_SCRIPT,
+    CONF_EXPAND_NUMBERS,
     CONF_NORMALIZE_TEXT,
     CONF_STYLE_INSTRUCTION,
+    CONF_TAIWAN_READINGS,
     DOMAIN,
     FIRST_AUDIO_FIELDS,
     MAX_REQUEST_SECONDS,
@@ -287,9 +289,17 @@ class SpeakFields(TypedDict):
     """Everything a synthesis request carries beyond text, model and voice."""
 
     normalize_text: bool
-    convert_script: bool
+    expand_numbers: bool | None
+    convert_script: bool | None
+    taiwan_readings: bool | None
     spoken_language: str | None
     instruct: str | None
+
+
+def _explicit(options: dict[str, Any], key: str) -> bool | None:
+    """An option as set, or ``None`` when it was not — never a default."""
+    value = options.get(key)
+    return None if value is None else bool(value)
 
 
 class CortexTTSEntity(TextToSpeechEntity):
@@ -331,7 +341,9 @@ class CortexTTSEntity(TextToSpeechEntity):
             ATTR_AUDIO_OUTPUT,
             ATTR_PREFERRED_FORMAT,
             CONF_NORMALIZE_TEXT,
+            CONF_EXPAND_NUMBERS,
             CONF_CONVERT_SCRIPT,
+            CONF_TAIWAN_READINGS,
         ]
         if model.style_instruction:
             self._attr_supported_options.append(CONF_STYLE_INSTRUCTION)
@@ -426,10 +438,11 @@ class CortexTTSEntity(TextToSpeechEntity):
         """Return what to tell the model beyond the voice.
 
         The language is Home Assistant's own — the pipeline's, which is the
-        language of the text, which is what the model has to be told. There is
-        no separate option for it: a second one would have to mean something
-        different from "what language is this", and nothing does. Sent only to
-        models that take one; the rest let the voice decide and would refuse it.
+        language of the text. There is no separate option for it: a second
+        one would have to mean something different from "what language is
+        this", and nothing does. Sent to every model: the server prepares the
+        text in that language on all of them, and tells the model too where
+        the model takes one.
 
         Absent rather than empty when unset: the server reads "" as a request
         for something.
@@ -443,43 +456,46 @@ class CortexTTSEntity(TextToSpeechEntity):
         # model's to say, and one of them names Chinese dialects while another
         # names 646 languages. The server narrows it against the model's own
         # list; doing it here would decide for a model that may know better.
-        spoken = language if self._model.language_choice else ""
         return {
-            "spoken_language": spoken or None,
+            "spoken_language": language or None,
             "instruct": str(instruct) if instruct else None,
         }
 
     def _speak_fields(self, language: str, options: dict[str, Any]) -> SpeakFields:
-        """The two text switches and the two delivery fields, as one set.
+        """The four text switches and the two delivery fields, as one set.
 
         One structure rather than two dicts merged at the call site: their
         values are of different types, so merging them loses both — every
         keyword then reads as `bool | str | None`, and `normalize_text` will
         take a string as far as the checker knows.
         """
-        text = self._text_options(language, options)
+        text = self._text_options(options)
         delivery = self._delivery_options(language, options)
         return SpeakFields(
             normalize_text=text["normalize_text"],
+            expand_numbers=text["expand_numbers"],
             convert_script=text["convert_script"],
+            taiwan_readings=text["taiwan_readings"],
             spoken_language=delivery["spoken_language"],
             instruct=delivery["instruct"],
         )
 
-    def _text_options(self, language: str, options: dict[str, Any]) -> dict[str, bool]:
-        """Return the two text-pipeline switches for a call.
+    def _text_options(self, options: dict[str, Any]) -> dict[str, bool | None]:
+        """Return the text-pipeline switches for a call.
 
-        Normalisation spells numbers in the script of the text, so it belongs
-        on for every language: the model pronounces no Arabic numeral at all,
-        and an unexpanded digit is silent rather than merely wrong. Script
-        conversion rewrites glyphs into Simplified and is meaningless outside
-        Chinese, so it follows the language tag. An explicit option still wins,
-        for a caller whose text is already prepared.
+        Normalisation reads the fixed shapes a sensor produces — a unit, a
+        clock, a date — in the language's own words, so it belongs on for
+        every language: the model pronounces no Arabic numeral at all. A bare
+        number (a room, a phone, a model) is the server's default not to
+        read, and the two Chinese rewrites are its to decide from the
+        language — so those travel only when an automation set them
+        outright, for a caller who knows what its numbers are.
         """
-        chinese = language.lower().startswith("zh")
         return {
             "normalize_text": bool(options.get(CONF_NORMALIZE_TEXT, True)),
-            "convert_script": bool(options.get(CONF_CONVERT_SCRIPT, chinese)),
+            "expand_numbers": _explicit(options, CONF_EXPAND_NUMBERS),
+            "convert_script": _explicit(options, CONF_CONVERT_SCRIPT),
+            "taiwan_readings": _explicit(options, CONF_TAIWAN_READINGS),
         }
 
     async def async_get_tts_audio(

@@ -163,7 +163,9 @@ class CortexTTSClient:
         voice: str | None,
         audio_format: str = "wav",
         normalize_text: bool = True,
-        convert_script: bool = True,
+        expand_numbers: bool | None = None,
+        convert_script: bool | None = None,
+        taiwan_readings: bool | None = None,
         spoken_language: str | None = None,
         instruct: str | None = None,
     ) -> tuple[bytes, dict[str, float]]:
@@ -174,8 +176,13 @@ class CortexTTSClient:
             model: Model id.
             voice: Voice id, or ``None`` to let the server pick its default.
             audio_format: Container to request.
-            normalize_text: Expand numbers, units and clock literals.
-            convert_script: Convert Traditional Chinese glyphs to Simplified.
+            normalize_text: Expand units, clock literals and dates.
+            expand_numbers: Read a bare number as a quantity too; ``None``
+                keeps the server's default, which is not to.
+            convert_script: Convert Traditional Chinese glyphs to Simplified;
+                ``None`` lets the server decide from the language.
+            taiwan_readings: Respell words Taiwan reads differently; ``None``
+                lets the server decide from the language.
             spoken_language: Which language the model reads the text as, on
                 the models that take one. ``None`` lets the voice decide.
             instruct: A plain-language instruction beside the voice, on the
@@ -192,7 +199,9 @@ class CortexTTSClient:
             model=model,
             voice=voice,
             normalize_text=normalize_text,
+            expand_numbers=expand_numbers,
             convert_script=convert_script,
+            taiwan_readings=taiwan_readings,
             spoken_language=spoken_language,
             instruct=instruct,
         )
@@ -220,7 +229,9 @@ class CortexTTSClient:
         model: str,
         voice: str | None,
         normalize_text: bool = True,
-        convert_script: bool = True,
+        expand_numbers: bool | None = None,
+        convert_script: bool | None = None,
+        taiwan_readings: bool | None = None,
         spoken_language: str | None = None,
         instruct: str | None = None,
     ) -> AsyncIterator[tuple[int, bytes]]:
@@ -246,7 +257,9 @@ class CortexTTSClient:
             model=model,
             voice=voice,
             normalize_text=normalize_text,
+            expand_numbers=expand_numbers,
             convert_script=convert_script,
+            taiwan_readings=taiwan_readings,
             spoken_language=spoken_language,
             instruct=instruct,
         )
@@ -306,22 +319,30 @@ def _speak_body(
     model: str,
     voice: str | None,
     normalize_text: bool,
-    convert_script: bool,
+    expand_numbers: bool | None,
+    convert_script: bool | None,
+    taiwan_readings: bool | None,
     spoken_language: str | None,
     instruct: str | None,
 ) -> dict[str, Any]:
     """Build the request both speak paths send.
 
-    The two optional fields are omitted rather than sent empty: the server
-    refuses one a model does not declare, and "" would be a request for
+    The optional fields are omitted rather than sent empty: an absent switch
+    is one the server decides from the language, the server refuses an
+    instruction a model does not declare, and "" would be a request for
     something.
     """
     body: dict[str, Any] = {
         "text": text,
         "model": model,
         "normalize_text": normalize_text,
-        "convert_script": convert_script,
     }
+    if expand_numbers is not None:
+        body["expand_numbers"] = expand_numbers
+    if convert_script is not None:
+        body["convert_script"] = convert_script
+    if taiwan_readings is not None:
+        body["taiwan_readings"] = taiwan_readings
     if voice:
         body["voice"] = voice
     if spoken_language:

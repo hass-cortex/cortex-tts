@@ -103,10 +103,11 @@ reachable from outside the Supervisor network, publish 8771 under the app's
 
 [![Open your Home Assistant instance and manage your voice assistants.](https://my.home-assistant.io/badges/voice_assistants.svg)](https://my.home-assistant.io/redirect/voice_assistants/)
 
-On most models the voice is what picks the language — a Chinese voice is the
-only thing that makes them read Chinese. Qwen3-TTS and OmniVoice take a
-language of their own, and on those the pipeline's language is sent with every
-reply, so the speaker is a timbre rather than a language.
+The pipeline's language is sent with every reply and decides how the text is
+prepared. On most models the voice is what picks the language the model
+speaks — a Chinese voice is the only thing that makes them read Chinese.
+Qwen3-TTS and OmniVoice take the language themselves, so there the speaker is
+a timbre rather than a language.
 
 ## Entities
 
@@ -115,16 +116,16 @@ One **TTS entity** per downloaded model, named after the model —
 one for OmniVoice — plus eight diagnostic sensors describing the reply it
 spoke most recently:
 
-| Sensor                  | Entity id                             | Unit | What it says                                                                                                          |
-| ----------------------- | ------------------------------------- | ---- | --------------------------------------------------------------------------------------------------------------------- |
-| **Time to first audio** | `sensor.<model>_time_to_first_audio`  | ms   | Request in, first frame out — the wait a listener feels                                                               |
-| **Last synthesis time** | `sensor.<model>_last_synthesis_time`  | ms   | Buffered reply: what the model cost, as the server measured it. Streamed reply: wall-clock from request to last frame |
-| **Last audio length**   | `sensor.<model>_last_audio_length`    | s    | How long the reply plays for                                                                                          |
-| **Real-time factor**    | `sensor.<model>_real_time_factor`     | —    | Synthesis time over audio length; below 1 outruns playback                                                            |
-| **Last text length**    | `sensor.<model>_last_text_length`     | —    | Characters in the reply                                                                                               |
-| **Playback margin**     | `sensor.<model>_playback_margin`      | s    | The least audio the listener still held when a piece of the reply arrived; negative means it had run dry             |
-| **Requests**            | `sensor.<model>_requests`             | —    | How many times the server was asked for this reply — one, whatever the mode, when there was nothing to group          |
-| **Last synthesis mode** | `sensor.<model>_last_synthesis_mode`  | —    | `Buffered`, `Sentence by sentence` or `Sentences in groups` — the setting the reply began under, not the shape it came out in |
+| Sensor                  | Entity id                            | Unit | What it says                                                                                                                  |
+| ----------------------- | ------------------------------------ | ---- | ----------------------------------------------------------------------------------------------------------------------------- |
+| **Time to first audio** | `sensor.<model>_time_to_first_audio` | ms   | Request in, first frame out — the wait a listener feels                                                                       |
+| **Last synthesis time** | `sensor.<model>_last_synthesis_time` | ms   | Buffered reply: what the model cost, as the server measured it. Streamed reply: wall-clock from request to last frame         |
+| **Last audio length**   | `sensor.<model>_last_audio_length`   | s    | How long the reply plays for                                                                                                  |
+| **Real-time factor**    | `sensor.<model>_real_time_factor`    | —    | Synthesis time over audio length; below 1 outruns playback                                                                    |
+| **Last text length**    | `sensor.<model>_last_text_length`    | —    | Characters in the reply                                                                                                       |
+| **Playback margin**     | `sensor.<model>_playback_margin`     | s    | The least audio the listener still held when a piece of the reply arrived; negative means it had run dry                      |
+| **Requests**            | `sensor.<model>_requests`            | —    | How many times the server was asked for this reply — one, whatever the mode, when there was nothing to group                  |
+| **Last synthesis mode** | `sensor.<model>_last_synthesis_mode` | —    | `Buffered`, `Sentence by sentence` or `Sentences in groups` — the setting the reply began under, not the shape it came out in |
 
 `<model>` is the slug of the model name, as in the TTS entity id. The margin
 is measured only on a reply that arrived in more than one piece — a buffered
@@ -157,8 +158,8 @@ data:
   message: 洗衣機洗好了，目前室內溫度 26.5°C。
 ```
 
-`language` decides which voices are on offer and sets the default for
-`convert_script`; number expansion stays on either way. The default is the
+`language` decides which voices are on offer and sets the defaults for
+`convert_script` and `taiwan_readings`; number expansion stays on either way. The default is the
 first of `zh-TW`, `zh`, `en-US`, `en` the model supports. On Qwen3-TTS and
 OmniVoice it is also what the model is told to read the text as — whole, as
 `zh-TW` rather than `zh`, because how much of a tag matters is the model's to
@@ -188,7 +189,7 @@ This integration adds an action that can:
 ```yaml
 action: cortex_tts.list_voices
 data:
-  entity_id: tts.moss_tts_nano   # optional; omit for every voice
+  entity_id: tts.moss_tts_nano # optional; omit for every voice
 response_variable: result
 ```
 
@@ -215,16 +216,18 @@ an id nobody remembers.
 
 ### Per-call options
 
-| Option             | Default                | Meaning                                                                                                                                                                                                                                                                       |
-| ------------------ | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `voice`            | server default         | Voice id — built-in or cloned. See above for how to find one                                                                                                                                                                                                                  |
+| Option             | Default                | Meaning                                                                                                                                                                                                                                                                                      |
+| ------------------ | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `voice`            | server default         | Voice id — built-in or cloned. See above for how to find one                                                                                                                                                                                                                                 |
 | `preferred_format` | `mp3`                  | Container for a buffered reply: `mp3`, `wav`, `flac` or `ogg`, answered directly. Home Assistant asks for `mp3` unless told otherwise, so a plain `tts.speak` is never transcoded. A streamed reply is always MP3, which is what a stream can be without declaring a length it does not know |
-| `audio_output`     | as above               | Read only when `preferred_format` is absent                                                                                                                                                                                                                                   |
-| `normalize_text`   | `true`                 | Expand numbers, units, dates and clock times, in the script of the text                                                                                                                                                                                                       |
-| `convert_script`   | Chinese languages only | Convert Traditional glyphs to Simplified                                                                                                                                                                                                                                      |
-| `instruct`         | none                   | A plain-language instruction beside the voice — `speak slowly, in a warm tone`. Offered **only on Qwen3-TTS 0.6B (built-in voices)**, the one model that reads one; on any other entity Home Assistant refuses the option before the request is sent |
+| `audio_output`     | as above               | Read only when `preferred_format` is absent                                                                                                                                                                                                                                                  |
+| `normalize_text`   | `true`                 | Expand units, clock times and dates in the language's own words                                                                                                                                                                                                                              |
+| `convert_script`   | Chinese languages only | Convert Traditional glyphs to Simplified                                                                                                                                                                                                                                                     |
+| `expand_numbers`   | `false`                | Also read a bare number — one with no unit, clock or date around it — as a quantity. Off because such a number is as often a room, a phone number or a model as a count, and a wrong reading misleads where digits left alone merely go unread                                               |
+| `taiwan_readings`  | `zh-TW` / `zh-Hant`    | Respell words Taiwan reads differently (垃圾 lè sè) with homophones the model reads that way; off for `zh-CN`; a bare `zh` counts when the text is Traditional                                                                                                                               |
+| `instruct`         | none                   | A plain-language instruction beside the voice — `speak slowly, in a warm tone`. Offered **only on Qwen3-TTS 0.6B (built-in voices)**, the one model that reads one; on any other entity Home Assistant refuses the option before the request is sent                                         |
 
-The two text switches exist for a caller whose text is already prepared;
+`normalize_text` and `convert_script` exist for a caller whose text is already prepared;
 turning conversion off for ordinary Traditional Chinese makes the voice
 unintelligible, and turning normalisation off leaves every digit silent.
 
@@ -239,9 +242,9 @@ in a quarter of real time and one that does not.
 Open the integration, then **Configure** on the model's row. A model cannot be
 added here — it appears by being downloaded in the app.
 
-| Setting           | Default    | Meaning                                                                                                                                                                                                                                                                                                                                                                       |
-| ----------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Speaking mode** | `Buffered` | `Buffered` renders the whole reply, then plays it — the longest wait, and it never stalls. `Sentence by sentence` speaks each sentence as it is finished: the quickest first word, with a join between every sentence. `Sentences in groups` sends together whatever was written while the last request was still rendering, so there are fewer joins — on a model that emits audio while a request is still rendering that removes the pauses outright, and on one that returns each request whole it trades several short waits for fewer longer ones.                         |
+| Setting           | Default    | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ----------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Speaking mode** | `Buffered` | `Buffered` renders the whole reply, then plays it — the longest wait, and it never stalls. `Sentence by sentence` speaks each sentence as it is finished: the quickest first word, with a join between every sentence. `Sentences in groups` sends together whatever was written while the last request was still rendering, so there are fewer joins — on a model that emits audio while a request is still rendering that removes the pauses outright, and on one that returns each request whole it trades several short waits for fewer longer ones.                                                                              |
 | **Head start**    | `0` s      | Seconds of audio to bank before a streamed reply begins playing, up to 10. A model that renders slower than its audio plays falls behind for the whole reply and never catches up; this hands it the difference in advance. Paid on time to first audio, and a grouped reply whose full length is known before the first request is charged only what a reply that long can lose. It banks by the audio it has received, so it is only a lever on a model that emits audio while a request is still rendering — the Hojo models return each request whole, and a bank smaller than the first request is already full when it arrives. |
 
 A change applies to the next reply; nothing reloads.
@@ -306,8 +309,16 @@ stream — so a model set to sentences in groups speaks announcements that way t
 - **The right words, mispronounced or garbled, in Chinese.** `convert_script`
   was turned off for Traditional Chinese text, or the language tag was not a
   `zh-*` one so conversion never ran. Send `language: zh-TW`.
-- **Digits are silent.** `normalize_text` was turned off. The model pronounces
-  no Arabic numeral at all.
+- **A word is read the mainland way (垃圾 as lā jī).** The language was not
+  `zh-TW`, so `taiwan_readings` stayed off. Send `language: zh-TW`, or set the
+  option. A word that is still wrong is missing from the app's table — see its
+  troubleshooting page.
+- **Digits are silent.** Either `normalize_text` was turned off, or the number
+  stands on its own — no unit, clock or date around it — which the app leaves
+  as digits on purpose, a bare number being as often a room or a phone number
+  as a count. Write the unit, or set `expand_numbers: true` under `options:`
+  for a call whose numbers are counts. The model pronounces no Arabic numeral
+  at all.
 - **It stutters near the end of long replies.** The model is not keeping up on
   this host; set its **Speaking mode** back to buffered, then read
   [Keeping up][streaming].

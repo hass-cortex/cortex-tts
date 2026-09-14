@@ -8,6 +8,8 @@ CONF_HOST = "host"
 CONF_API_KEY = "api_key"
 CONF_NORMALIZE_TEXT = "normalize_text"
 CONF_CONVERT_SCRIPT = "convert_script"
+CONF_TAIWAN_READINGS = "taiwan_readings"
+CONF_EXPAND_NUMBERS = "expand_numbers"
 
 # A per-call option the server accepts only from the model that declares it,
 # so the entity offers it only where it means something. Home Assistant
