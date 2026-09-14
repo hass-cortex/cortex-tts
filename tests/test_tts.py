@@ -18,16 +18,17 @@ class TestTextOptions:
     def _options(given: dict[str, object] | None = None) -> dict[str, bool | None]:
         return CortexTTSEntity._text_options(None, given or {})  # type: ignore[arg-type]
 
-    def test_numbers_are_expanded_unless_told_otherwise(self) -> None:
-        assert self._options()["normalize_text"] is True
+    def test_normalisation_travels_only_when_set(self) -> None:
+        # Unset, the server's own rules answer; it is on there by default.
+        assert self._options()["normalize_text"] is None
         assert self._options({"normalize_text": False})["normalize_text"] is False
 
-    def test_the_chinese_rewrites_are_left_to_the_server(self) -> None:
-        # The server decides both from the language it is sent — conversion
-        # for any Chinese, Taiwan readings for Taiwan's — so an unset option
-        # travels as absent, never as a default chosen here.
+    def test_every_switch_is_left_to_the_server(self) -> None:
+        # The server decides from its settings and the language it is sent —
+        # conversion for any Chinese, Taiwan readings for Taiwan's — so an
+        # unset option travels as absent, never as a default chosen here.
         assert self._options() == {
-            "normalize_text": True,
+            "normalize_text": None,
             "expand_numbers": None,
             "convert_script": None,
             "taiwan_readings": None,

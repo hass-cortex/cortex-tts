@@ -288,7 +288,7 @@ async def _coalesced(
 class SpeakFields(TypedDict):
     """Everything a synthesis request carries beyond text, model and voice."""
 
-    normalize_text: bool
+    normalize_text: bool | None
     expand_numbers: bool | None
     convert_script: bool | None
     taiwan_readings: bool | None
@@ -483,16 +483,15 @@ class CortexTTSEntity(TextToSpeechEntity):
     def _text_options(self, options: dict[str, Any]) -> dict[str, bool | None]:
         """Return the text-pipeline switches for a call.
 
-        Normalisation reads the fixed shapes a sensor produces — a unit, a
-        clock, a date — in the language's own words, so it belongs on for
-        every language: the model pronounces no Arabic numeral at all. A bare
-        number (a room, a phone, a model) is the server's default not to
-        read, and the two Chinese rewrites are its to decide from the
-        language — so those travel only when an automation set them
-        outright, for a caller who knows what its numbers are.
+        Each switch travels only when an automation set it outright. Left
+        out, the server answers from its own settings — a rule per model and
+        language — and then from what it knows: normalisation on for every
+        language (the model pronounces no Arabic numeral at all), a bare
+        number read only for a model that cannot say a digit, the two
+        Chinese rewrites decided from the language.
         """
         return {
-            "normalize_text": bool(options.get(CONF_NORMALIZE_TEXT, True)),
+            "normalize_text": _explicit(options, CONF_NORMALIZE_TEXT),
             "expand_numbers": _explicit(options, CONF_EXPAND_NUMBERS),
             "convert_script": _explicit(options, CONF_CONVERT_SCRIPT),
             "taiwan_readings": _explicit(options, CONF_TAIWAN_READINGS),

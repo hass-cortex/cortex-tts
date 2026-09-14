@@ -162,7 +162,7 @@ class CortexTTSClient:
         model: str,
         voice: str | None,
         audio_format: str = "wav",
-        normalize_text: bool = True,
+        normalize_text: bool | None = None,
         expand_numbers: bool | None = None,
         convert_script: bool | None = None,
         taiwan_readings: bool | None = None,
@@ -176,7 +176,8 @@ class CortexTTSClient:
             model: Model id.
             voice: Voice id, or ``None`` to let the server pick its default.
             audio_format: Container to request.
-            normalize_text: Expand units, clock literals and dates.
+            normalize_text: Expand units, clock literals and dates; ``None``
+                leaves it to the server, whose rules and default say on.
             expand_numbers: Read a bare number as a quantity too; ``None``
                 keeps the server's default, which is not to.
             convert_script: Convert Traditional Chinese glyphs to Simplified;
@@ -228,7 +229,7 @@ class CortexTTSClient:
         *,
         model: str,
         voice: str | None,
-        normalize_text: bool = True,
+        normalize_text: bool | None = None,
         expand_numbers: bool | None = None,
         convert_script: bool | None = None,
         taiwan_readings: bool | None = None,
@@ -318,7 +319,7 @@ def _speak_body(
     *,
     model: str,
     voice: str | None,
-    normalize_text: bool,
+    normalize_text: bool | None,
     expand_numbers: bool | None,
     convert_script: bool | None,
     taiwan_readings: bool | None,
@@ -332,11 +333,9 @@ def _speak_body(
     instruction a model does not declare, and "" would be a request for
     something.
     """
-    body: dict[str, Any] = {
-        "text": text,
-        "model": model,
-        "normalize_text": normalize_text,
-    }
+    body: dict[str, Any] = {"text": text, "model": model}
+    if normalize_text is not None:
+        body["normalize_text"] = normalize_text
     if expand_numbers is not None:
         body["expand_numbers"] = expand_numbers
     if convert_script is not None:
