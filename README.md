@@ -223,13 +223,15 @@ an id nobody remembers.
 | `audio_output`     | as above               | Read only when `preferred_format` is absent                                                                                                                                                                                                                                                  |
 | `normalize_text`   | `true`                 | Expand units, clock times and dates in the language's own words                                                                                                                                                                                                                              |
 | `convert_script`   | Chinese languages only | Convert Traditional glyphs to Simplified                                                                                                                                                                                                                                                     |
-| `expand_numbers`   | `false`                | Also read a bare number — one with no unit, clock or date around it — as a quantity. Off because such a number is as often a room, a phone number or a model as a count, and a wrong reading misleads where digits left alone merely go unread                                               |
+| `expand_numbers`   | app rule, else model   | Also read a bare number — one with no unit, clock or date around it — as a quantity. Left out, on only for a model that cannot say a digit at all (Hojo); off otherwise, because such a number is as often a room, a phone number or a model as a count, and a wrong reading misleads          |
 | `taiwan_readings`  | `zh-TW` / `zh-Hant`    | Respell words Taiwan reads differently (垃圾 lè sè) with homophones the model reads that way; off for `zh-CN`; a bare `zh` counts when the text is Traditional                                                                                                                               |
 | `instruct`         | none                   | A plain-language instruction beside the voice — `speak slowly, in a warm tone`. Offered **only on Qwen3-TTS 0.6B (built-in voices)**, the one model that reads one; on any other entity Home Assistant refuses the option before the request is sent                                         |
 
 `normalize_text` and `convert_script` exist for a caller whose text is already prepared;
 turning conversion off for ordinary Traditional Chinese makes the voice
-unintelligible, and turning normalisation off leaves every digit silent.
+unintelligible, and turning normalisation off leaves every digit silent. Any of
+the four left out is answered by the app's own settings first — a rule per
+model and language on its Settings page — and only then by the pipeline.
 
 ## Options
 
@@ -317,8 +319,8 @@ stream — so a model set to sentences in groups speaks announcements that way t
   stands on its own — no unit, clock or date around it — which the app leaves
   as digits on purpose, a bare number being as often a room or a phone number
   as a count. Write the unit, or set `expand_numbers: true` under `options:`
-  for a call whose numbers are counts. The model pronounces no Arabic numeral
-  at all.
+  for a call whose numbers are counts. (Hojo cannot say a digit at all, so
+  for it the app reads bare numbers by default.)
 - **It stutters near the end of long replies.** The model is not keeping up on
   this host; set its **Speaking mode** back to buffered, then read
   [Keeping up][streaming].
