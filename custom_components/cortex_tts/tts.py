@@ -373,11 +373,14 @@ class CortexTTSEntity(TextToSpeechEntity):
         def offer(voices: list[VoiceInfo]) -> list[Voice]:
             return [Voice(voice_id=v.id, name=v.name) for v in voices]
 
+        # Both sides by primary subtag: a voice labelled zh-TW serves a
+        # zh-CN pipeline too — the region says how its text is read, not
+        # which pipelines may pick it.
         base = language.split("-")[0].lower()
         matching = [
             voice
             for voice in self._voices
-            if voice.language is None or voice.language.lower() == base
+            if voice.language is None or voice.language.split("-")[0].lower() == base
         ]
         if matching:
             return offer(matching)

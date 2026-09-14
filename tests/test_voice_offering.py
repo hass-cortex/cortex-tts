@@ -58,6 +58,13 @@ class TestTheOrdinaryCase:
         )
         assert _ids(entity.async_get_supported_voices("zh-TW")) == ["zh1"]
 
+    def test_a_regional_voice_serves_every_region_of_its_language(self) -> None:
+        entity = _entity(
+            [_voice("tw", "zh-TW"), _voice("en1", "en")], language_choice=False
+        )
+        assert _ids(entity.async_get_supported_voices("zh-CN")) == ["tw"]
+        assert _ids(entity.async_get_supported_voices("zh")) == ["tw"]
+
     def test_a_voice_without_a_language_is_offered_everywhere(self) -> None:
         """A designed voice reads whatever it is given."""
         entity = _entity(
