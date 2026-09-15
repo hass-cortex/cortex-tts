@@ -18,9 +18,6 @@ from homeassistant.config_entries import (
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
-    NumberSelector,
-    NumberSelectorConfig,
-    NumberSelectorMode,
     SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
@@ -31,16 +28,13 @@ from homeassistant.helpers.service_info.hassio import HassioServiceInfo
 from .client import CortexTTSClient
 from .const import (
     CONF_API_KEY,
-    CONF_HEAD_START,
     CONF_HOST,
     CONF_STREAM_MODE,
-    DEFAULT_HEAD_START,
     DOMAIN,
-    MAX_HEAD_START,
     STREAM_MODES,
     SUBENTRY_TYPE,
 )
-from .models import default_stream_mode
+from .models import stream_mode_setting
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -71,10 +65,10 @@ def server_label(host: str) -> str:
     """What to call a server in an entry title.
 
     Host and port, because together they are what differs between two entries
-    and what does not change. The app's version used to go here, read once
-    from `/health` at setup: it named what happened to be running that day,
-    never moved again, and said nothing about which machine — which is the one
-    question a title has to answer as soon as there is more than one server.
+    and what does not change. Not the app's version: read once from `/health`
+    at setup it would name whatever ran that day, never move again, and say
+    nothing about which machine — the one question a title has to answer as
+    soon as there is more than one server.
 
     The port is shown even when it is the default, so the title is the address
     a reader can paste rather than one they have to complete from memory.
@@ -267,8 +261,7 @@ class ModelSubentryFlow(ConfigSubentryFlow):
             {
                 vol.Required(
                     CONF_STREAM_MODE,
-                    default=subentry.data.get(CONF_STREAM_MODE)
-                    or default_stream_mode(),
+                    default=stream_mode_setting(subentry.data.get(CONF_STREAM_MODE)),
                 ): SelectSelector(
                     SelectSelectorConfig(
                         options=[
@@ -277,18 +270,6 @@ class ModelSubentryFlow(ConfigSubentryFlow):
                         ],
                         translation_key=CONF_STREAM_MODE,
                         mode=SelectSelectorMode.LIST,
-                    )
-                ),
-                vol.Required(
-                    CONF_HEAD_START,
-                    default=subentry.data.get(CONF_HEAD_START, DEFAULT_HEAD_START),
-                ): NumberSelector(
-                    NumberSelectorConfig(
-                        min=0,
-                        max=MAX_HEAD_START,
-                        step=0.1,
-                        unit_of_measurement="s",
-                        mode=NumberSelectorMode.BOX,
                     )
                 ),
             }

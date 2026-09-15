@@ -12,7 +12,7 @@ would have to mean something else, and nothing does.
 
 from __future__ import annotations
 
-from custom_components.cortex_tts.client import _speak_body
+from custom_components.cortex_tts.client import _speak_common
 from custom_components.cortex_tts.const import CONF_STYLE_INSTRUCTION
 from custom_components.cortex_tts.models import ModelInfo
 
@@ -37,8 +37,7 @@ class TestWhatTheServerIsSent:
     """An unset option is absent, not empty: "" would ask for something."""
 
     def test_neither_is_sent_when_unset(self) -> None:
-        body = _speak_body(
-            "hi",
+        body = _speak_common(
             model="m",
             voice=None,
             normalize_text=None,
@@ -52,8 +51,7 @@ class TestWhatTheServerIsSent:
         assert "instruct" not in body
 
     def test_an_empty_string_is_not_a_request(self) -> None:
-        body = _speak_body(
-            "hi",
+        body = _speak_common(
             model="m",
             voice=None,
             normalize_text=None,
@@ -67,8 +65,7 @@ class TestWhatTheServerIsSent:
         assert "instruct" not in body
 
     def test_both_travel_when_set(self) -> None:
-        body = _speak_body(
-            "hi",
+        body = _speak_common(
             model="m",
             voice="vivian",
             normalize_text=None,

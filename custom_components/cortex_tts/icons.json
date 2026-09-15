@@ -12,9 +12,9 @@
       "mode": {
         "default": "mdi:broadcast",
         "state": {
-          "buffered": "mdi:tray-full",
-          "sentence": "mdi:format-list-numbered",
-          "coalesced": "mdi:format-list-group"
+          "streaming": "mdi:waveform",
+          "paced": "mdi:timer-sand",
+          "whole": "mdi:tray-full"
         }
       }
     }

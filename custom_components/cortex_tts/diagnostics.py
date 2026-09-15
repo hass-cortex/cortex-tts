@@ -9,7 +9,7 @@ from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.core import HomeAssistant
 
 from .client import CortexTTSError
-from .const import CONF_API_KEY, STREAM_RTF_CEILING
+from .const import CONF_API_KEY
 from .models import default_stream_mode, stream_mode
 
 if TYPE_CHECKING:
@@ -48,7 +48,6 @@ async def async_get_config_entry_diagnostics(
             for subentry in entry.subentries.values()
         ],
         "server": health,
-        "stream_rtf_ceiling": STREAM_RTF_CEILING,
         "models": [
             {
                 "id": model.id,

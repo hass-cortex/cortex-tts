@@ -28,14 +28,13 @@ include = ["custom_components*"]
 
 [dependency-groups]
 dev = ["ruff>=0.14", "pyright>=1.1.390", "commitizen>=4.0", "pre-commit>=4.0"]
-# aiohttp and sentence-stream are what the integration imports at module level;
+# aiohttp is what the integration imports at module level;
 # homeassistant is not installed — tests/conftest.py stands in for it.
 test = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "pytest-cov>=6.0",
     "aiohttp>=3.10",
-    "sentence-stream==1.3.0",
     "voluptuous>=0.15",
     "pyyaml>=6.0",
 ]

@@ -64,7 +64,7 @@
   "entity": {
     "sensor": {
       "inference_ms": {
-        "name": "Last synthesis time"
+        "name": "Render time"
       },
       "first_audio_ms": {
         "name": "Time to first audio"
@@ -73,24 +73,28 @@
         "name": "Real-time factor"
       },
       "audio_seconds": {
-        "name": "Last audio length"
+        "name": "Audio length"
       },
       "characters": {
-        "name": "Last text length"
+        "name": "Text length"
       },
       "requests": {
-        "name": "Requests"
+        "name": "Render batches"
       },
       "mode": {
-        "name": "Last synthesis mode",
+        "name": "Delivery mode",
         "state": {
-          "buffered": "Buffered",
-          "sentence": "Sentence by sentence",
-          "coalesced": "Sentences in groups"
+          "whole": "Whole",
+          "streaming": "Streaming",
+          "paced": "Paced",
+            "buffered": "Buffered"
         }
       },
       "margin_seconds": {
         "name": "Playback margin"
+      },
+      "text": {
+        "name": "Text"
       }
     }
   },
@@ -101,12 +105,10 @@
           "title": "{model}",
           "description": "How this model should speak a reply that is still being written.",
           "data": {
-            "stream_mode": "Speaking mode",
-            "head_start": "Head start"
+            "stream_mode": "Speaking mode"
           },
           "data_description": {
-            "stream_mode": "Buffered renders the whole reply before any of it plays — the longest wait, but it never stalls. Sentence by sentence speaks each sentence as it is finished: the quickest first word, with a join between every sentence. Sentences in groups sends together whatever was written while the last request was still rendering, so there are fewer joins — on a model that emits audio while a request is still rendering that removes the pauses outright, and on one that returns each request whole it trades several short waits for fewer longer ones.",
-            "head_start": "Seconds of audio to bank before a streamed reply starts playing. A model that renders slower than its audio plays falls behind for the whole reply and never catches up, and this is the difference handed over in advance. Leave at 0 for a model that keeps ahead. The cost is paid on time to first audio, and only up to what the reply can actually lose: a one-line answer waits a fraction of it."
+            "stream_mode": "Automatic lets the app decide for each reply, from what it has measured about this model on its own host: spoken as it is written when the model keeps ahead of its audio, held back just long enough when it does not, and rendered whole while the model is still unmeasured. Buffered renders the whole reply before any of it plays — the longest wait, and it never stalls. Every model starts buffered; switch to automatic once the real-time factor sensor has a figure."
           }
         }
       },
@@ -123,9 +125,8 @@
   "selector": {
     "stream_mode": {
       "options": {
-        "buffered": "Buffered — render it all, then play",
-        "sentence": "Sentence by sentence",
-        "coalesced": "Sentences in groups"
+        "auto": "Automatic — the app paces each reply",
+        "buffered": "Buffered — render it all, then play"
       }
     }
   },

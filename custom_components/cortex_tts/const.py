@@ -22,61 +22,6 @@ CONF_EXPAND_NUMBERS = "expand_numbers"
 # be told.
 CONF_STYLE_INSTRUCTION = "instruct"
 CONF_STREAM_MODE = "stream_mode"
-CONF_HEAD_START = "head_start"
-
-# Seconds of audio to hold back before a stream starts playing. A model that
-# renders slower than its audio plays loses ground for the whole reply and
-# never wins it back, so the listener has to be given the difference up front:
-# at a rate of R, a reply of L seconds needs (R-1) x L. MOSS-TTS-Nano measured
-# 1.045x on the development host, where two seconds covers a 44-second reply.
-#
-# Zero by default: the right value is a property of the host, so it is set by
-# whoever can measure it. The server publishes no figure of its own to guess
-# from — it reports only what its own host measured.
-DEFAULT_HEAD_START = 0.0
-MAX_HEAD_START = 10.0
-
-# A head start is sized for the worst reply, and most replies are not that.
-# Once the whole reply is in hand its length is known, so the bank shrinks to
-# what a reply that long can actually lose: a one-line answer waits a fifth of
-# a second rather than the two seconds a forty-second bulletin needs.
-#
-# Speech runs at roughly this many characters a second, per script. Measured
-# on the Hojo 40M in production: 108 characters of Chinese as 26.6 s, 309 of
-# Latin as 21.1 s. MOSS-TTS-Nano reads Chinese slightly faster (4.4); the
-# slower figure is the safe one, because everything sized from it — the bank
-# below, the request limit — wants to over-estimate rather than under.
-CHARS_PER_SECOND = 4.1
-LATIN_CHARS_PER_SECOND = 14.7
-
-# How far behind playback a streamed model is assumed to fall while sizing
-# that shrink. MOSS measured 1.045x on the development host; a tenth leaves
-# room for a worse moment. Only ever lowers the configured head start.
-ASSUMED_DEFICIT = 0.10
-
-# The most audio to ask for in one request. Coalescing removed the cost of
-# sending one sentence at a time — a fresh prefill for every sentence — but a
-# request that is too long costs more than it saves: the model attends over
-# everything it has generated so far, so the bill grows with the square of the
-# request rather than in proportion to it.
-#
-# Measured on MOSS-TTS-Nano, the same 55 s story sent in pieces of different
-# sizes, as the fraction by which rendering fell behind playback:
-#
-#     ~1 s per request (one sentence)   +41%
-#     ~9 s                               +4.1%
-#     ~19 s                              +5.6%
-#     ~28 s                              +6.5%
-#     ~55 s (one request)               +17.8%
-#
-# A valley with a cliff on either side. This sits in the flat part of it.
-#
-# It is a limit on the request, not on the batching: a single sentence over it
-# is split at a clause mark rather than sent whole. That costs something on
-# every model and for a different reason on each — a run-on lands on the right
-# cliff above whatever emits audio as it renders, and arrives as one lump on
-# whatever does not.
-MAX_REQUEST_SECONDS = 14.0
 
 # One subentry per downloaded model, so each model's options have somewhere to
 # live that the UI already knows how to show. The integration mints them from
@@ -84,28 +29,47 @@ MAX_REQUEST_SECONDS = 14.0
 # here — so the subentry flow only ever reconfigures.
 SUBENTRY_TYPE = "model"
 
-# How a reply reaches the speaker. The same three words name the setting and
-# the outcome the sensor reports, because they are the same fact: what the
-# listener got.
+# How a reply that is still being written reaches the speaker. Two settings:
+# the app decides per reply from what it has measured, or nothing plays until
+# the whole reply is rendered. The app publishes no figure to choose from — it
+# measures its own host — so the choice a person makes here is only whether
+# to let it.
 STREAM_BUFFERED = "buffered"
 """Render the whole reply, then play it. No stall, the longest wait."""
-STREAM_SENTENCE = "sentence"
-"""One request per finished sentence, played as each arrives."""
-STREAM_COALESCED = "coalesced"
-"""As above, but sentences that arrive while a request is in flight are sent
-together. Measured on MOSS-TTS-Nano: three sentences sent one at a time stalled
-0.37s at each boundary and left a player 0.45s short, while the same text in
-one request never ran dry and reached first audio just as fast."""
-STREAM_MODES = (STREAM_BUFFERED, STREAM_SENTENCE, STREAM_COALESCED)
+STREAM_AUTO = "auto"
+"""Let the app pace the reply: streamed, paced or buffered, chosen per reply
+from what it has measured about the model on its host."""
+STREAM_MODES = (STREAM_AUTO, STREAM_BUFFERED)
 
-# Published advice, not a rule: the measured RTF to be under before streaming
-# is worth enabling. Nothing branches on it.
-STREAM_RTF_CEILING = 0.5
+# The two words the setting used to have for streaming. A stored value from
+# then means the person wanted the reply spoken as it was written, which is
+# now `auto`; reading it as anything else would silently turn streaming off.
+LEGACY_STREAM_MODES = frozenset({"sentence", "coalesced"})
+
+# What the app reports a reply was actually spoken as, in its `done` frame.
+# The sensor shows these; the setting above offers the two before them.
+STREAM_WHOLE = "whole"
+STREAM_STREAMING = "streaming"
+STREAM_PACED = "paced"
+SPOKEN_MODES = (STREAM_WHOLE, STREAM_STREAMING, STREAM_PACED, STREAM_BUFFERED)
+"""How a reply is being spoken, as the app reports it. Not the setting — that
+is `STREAM_MODES`.
+
+Every value either frame can carry, because the sensor is written from both:
+a `batch` frame names the plan in force (`streaming`, `paced` or `buffered`)
+before any audio exists, and `done` corrects it afterwards with what actually
+happened (`whole` when the reply fit one request, however it was planned).
+Omitting one is not a wrong label but a failed reply: an enum sensor handed a
+state outside its options raises, and the exception surfaces as a 500 from
+`/api/tts_proxy`, so nothing plays at all."""
 
 # Sensor keys a mid-stream push may write. These two are settled the moment the
 # first frame leaves — everything else is a total that is not true until the
 # last sentence is rendered, and reporting it early would be a lie.
 FIRST_AUDIO_FIELDS = frozenset({"first_audio_ms", "mode"})
+
+# Settled the moment the writer finishes, well before the reply is rendered.
+TEXT_FIELDS = frozenset({"text", "characters"})
 
 # The addon fires this on the HA event bus when its downloaded-model set or its
 # voice list changes, so entities appear and disappear without a reload.
@@ -117,7 +81,7 @@ def models_changed_signal(entry_id: str) -> str:
     return f"{DOMAIN}_models_changed_{entry_id}"
 
 
-# What `/api/speak/stream` is asked for. MP3 is a bare sequence of
+# What `/api/speak/live` is asked for. MP3 is a bare sequence of
 # self-describing frames — no container, no length field, no index — which is
 # the only honest thing to send when the length is not known yet. A WAV stream
 # has to declare one, and the maximal value it declared was read by a

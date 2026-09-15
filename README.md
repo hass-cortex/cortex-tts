@@ -30,10 +30,10 @@ diagnostic sensors.
 - **A style instruction where the model reads one** — Qwen3-TTS takes a
   plain-language note beside the voice (`speak slowly, in a warm tone`),
   offered as a `tts.speak` option on that entity alone.
-- **Streaming, per model, and off until you ask** — a model that renders
-  faster than its audio plays can start on the opening sentences instead of the
-  last one. Every model starts buffered; you turn streaming on after your own
-  sensors have said the model keeps up on your host.
+- **Streaming, per model, and off until you ask** — set a model to
+  automatic and the app speaks each reply as it is written, pacing it from
+  what it has measured about that model on its own host. Every model starts
+  buffered; you switch it after your own sensors have a figure.
 - **A service for voice ids** — `cortex_tts.list_voices` answers what
   `tts.speak` needs, which Home Assistant otherwise publishes only to the
   dashboard.
@@ -51,7 +51,7 @@ diagnostic sensors.
 - **Home Assistant 2026.3.0 or newer.** 2026.3 is the release from which Home
   Assistant serves an integration's own `brand/` icons, which is where this
   one's live; it also brings the Python 3.14 the code is written for.
-- **Cortex TTS app 0.1.0 or newer**, which speaks API version 1. The
+- **Cortex TTS app 0.6.0 or newer**, which speaks API version 3. The
   integration reads `api_version` from the app's `/health` and refuses to set
   up with "unsupported API" when the two sides disagree — update whichever is
   older. An app too old to report `style_instruction` simply offers no
@@ -113,23 +113,27 @@ a timbre rather than a language.
 
 One **TTS entity** per downloaded model, named after the model —
 `tts.hojo_tts_light_40m`, `tts.moss_tts_nano`, one per Qwen3-TTS checkpoint,
-one for OmniVoice — plus eight diagnostic sensors describing the reply it
+one for OmniVoice — plus nine sensors describing the reply it
 spoke most recently:
 
-| Sensor                  | Entity id                            | Unit | What it says                                                                                                                  |
-| ----------------------- | ------------------------------------ | ---- | ----------------------------------------------------------------------------------------------------------------------------- |
-| **Time to first audio** | `sensor.<model>_time_to_first_audio` | ms   | Request in, first frame out — the wait a listener feels                                                                       |
-| **Last synthesis time** | `sensor.<model>_last_synthesis_time` | ms   | Buffered reply: what the model cost, as the server measured it. Streamed reply: wall-clock from request to last frame         |
-| **Last audio length**   | `sensor.<model>_last_audio_length`   | s    | How long the reply plays for                                                                                                  |
-| **Real-time factor**    | `sensor.<model>_real_time_factor`    | —    | Synthesis time over audio length; below 1 outruns playback                                                                    |
-| **Last text length**    | `sensor.<model>_last_text_length`    | —    | Characters in the reply                                                                                                       |
-| **Playback margin**     | `sensor.<model>_playback_margin`     | s    | The least audio the listener still held when a piece of the reply arrived; negative means it had run dry                      |
-| **Requests**            | `sensor.<model>_requests`            | —    | How many times the server was asked for this reply — one, whatever the mode, when there was nothing to group                  |
-| **Last synthesis mode** | `sensor.<model>_last_synthesis_mode` | —    | `Buffered`, `Sentence by sentence` or `Sentences in groups` — the setting the reply began under, not the shape it came out in |
+| Sensor                  | Entity id                            | Unit | What it says                                                                                                                                                                      |
+| ----------------------- | ------------------------------------ | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Text**                | `sensor.<model>_text`                | —    | What was said, as handed to the app; the state is the first 255 characters, the `text` attribute the whole                                                                        |
+| **Time to first audio** | `sensor.<model>_time_to_first_audio` | ms   | Request in, first frame out — the wait a listener feels                                                                                                                           |
+| **Render time**         | `sensor.<model>_render_time`         | ms   | What the model was busy for, as the app measured it — never this side's clock, which also spans the writer and the opening hold                                                   |
+| **Audio length**        | `sensor.<model>_audio_length`        | s    | How long the reply plays for                                                                                                                                                      |
+| **Real-time factor**    | `sensor.<model>_real_time_factor`    | —    | This reply's render time over its audio length; below 1 outruns playback. One reply, fixed cost included — the app's own model card fits that cost apart and reads a little lower |
+| **Text length**         | `sensor.<model>_text_length`         | —    | Characters in the reply                                                                                                                                                           |
+| **Playback margin**     | `sensor.<model>_playback_margin`     | s    | The least audio the listener still held as the reply left the app; negative means it had run dry                                                                                  |
+| **Render batches**      | `sensor.<model>_render_batches`      | —    | How many requests the app rendered the reply in: one for a whole reply, several for a live one                                                                                    |
+| **Delivery mode**       | `sensor.<model>_delivery_mode`       | —    | `Whole`, `Streaming` or `Paced` — how the app actually spoke the reply: one request, or several streamed or paced, which a model set to automatic decides per reply               |
+
+Text, Delivery mode, Time to first audio and Playback margin sit on the
+device's main card — what was said and how it went. The rest measure the model
+and are diagnostic.
 
 `<model>` is the slug of the model name, as in the TTS entity id. The margin
-is measured only on a reply that arrived in more than one piece — a buffered
-one, or a streamed one short enough to be handed over whole, leaves it
+is measured only on a reply the app spoke live; a buffered one leaves it
 unknown, because nothing could arrive late.
 
 They are diagnostic and describe the last reply only, never a running total, so
@@ -137,9 +141,9 @@ two replies are never mixed. All of them clear when a new reply begins: a
 failed synthesis leaves them unknown rather than zero, because zero would read
 as "instant".
 
-A streamed reply settles its numbers at two moments — the wait and the mode are
-known when the first frame leaves, the totals only once the last sentence is
-rendered — so each lands as soon as it becomes true.
+A live reply settles its numbers at two moments — the wait is known when the
+first frame arrives, the totals and the mode only once the app reports how it
+went — so each lands as soon as it becomes true.
 
 ## Speaking
 
@@ -244,51 +248,50 @@ in a quarter of real time and one that does not.
 Open the integration, then **Configure** on the model's row. A model cannot be
 added here — it appears by being downloaded in the app.
 
-| Setting           | Default    | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| ----------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Speaking mode** | `Buffered` | `Buffered` renders the whole reply, then plays it — the longest wait, and it never stalls. `Sentence by sentence` speaks each sentence as it is finished: the quickest first word, with a join between every sentence. `Sentences in groups` sends together whatever was written while the last request was still rendering, so there are fewer joins — on a model that emits audio while a request is still rendering that removes the pauses outright, and on one that returns each request whole it trades several short waits for fewer longer ones.                                                                              |
-| **Head start**    | `0` s      | Seconds of audio to bank before a streamed reply begins playing, up to 10. A model that renders slower than its audio plays falls behind for the whole reply and never catches up; this hands it the difference in advance. Paid on time to first audio, and a grouped reply whose full length is known before the first request is charged only what a reply that long can lose. It banks by the audio it has received, so it is only a lever on a model that emits audio while a request is still rendering — the Hojo models return each request whole, and a bank smaller than the first request is already full when it arrives. |
+| Setting           | Default    | Meaning                                                                                                                                                                                                                                                                                                                                                          |
+| ----------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Speaking mode** | `Buffered` | `Buffered` renders the whole reply, then plays it — the longest wait, and it never stalls. `Automatic` hands the reply to the app as it is written and lets the app pace it from what it has measured about this model on its host: streamed when the model keeps ahead of its audio, held back just long enough when it does not, whole while it is unmeasured. |
 
 A change applies to the next reply; nothing reloads.
 
 **Buffered is the default for every model, deliberately.** There is no
 figure to decide for you: a real-time factor belongs to a host, so the app
 carries none and shows only what your own machine has measured. Use the
-model for a while, read `sensor.<model>_real_time_factor`, and switch to
-sentences in groups if it sits comfortably under **0.5**; then watch
-`sensor.<model>_playback_margin`. The reasoning, the measurements and what to
-do when the margin goes negative are in [Keeping up][streaming].
+model for a while, read `sensor.<model>_real_time_factor`, switch to automatic,
+then watch `sensor.<model>_playback_margin`. How the app decides, the
+measurements behind it and what to do when the margin goes negative are in
+[Keeping up][streaming].
 
 ## How it works
 
 ### Streaming
 
-A long reply is normally silent until the last word has been synthesised. In
-either streaming mode, each finished sentence is synthesised and played while
-the rest is still being written, so the wait before the first word stops
-growing with the length of the reply.
+A long reply is normally silent until the last word has been synthesised. With
+a model set to automatic, the reply goes to the app over one WebSocket as the
+conversation agent writes it, and the app renders it in pieces sized to what
+the listener already holds — so the wait before the first word stops growing
+with the length of the reply, and a piece is never sent so early that the
+next one cannot follow in time. The app measures every request it serves and
+paces the next reply from that; this integration only forwards the words and
+plays the sound. The reasoning and the measurements are in
+[Keeping up][streaming].
 
-Sentence boundaries come from
-[`sentence-stream`](https://github.com/OHF-Voice/sentence-stream), the same
-splitter Home Assistant's own streaming engines use; it handles `。！？` as well
-as Latin punctuation.
-
-A model has to synthesise faster than its audio plays to keep a stream fed; a
-cloning model also has to hold one voice steady across separately synthesised
-sentences, so leave a cloning model buffered unless you have listened to it
-streamed. Chunk streaming is not a cure for a slow model: Qwen3-TTS emits
-audio mid-sentence and is still the slowest model here, so on a host where it
-renders at several times real time every block arrives later than the last.
 Set a model back to buffered if a media player refuses the stream: a player
 that probes the file before playing — AirPlay targets do — can give up waiting
 for the first bytes of a long reply and fail to open it, while the audio itself
 is perfectly fine. Assist pipelines and voice satellites take streams without
 trouble.
 
-Each model's **Last synthesis mode** sensor reports the mode the model was set
-to when the reply began. Home Assistant routes every reply through that mode —
-a whole message handed to `tts.speak` included, which it wraps as a one-item
-stream — so a model set to sentences in groups speaks announcements that way too.
+Each model's **Last synthesis mode** sensor reports how the app actually spoke
+the last reply — streamed, paced or buffered — which a model set to automatic
+decides per reply. Home Assistant routes every reply through the setting, a
+whole message handed to `tts.speak` included, which it wraps as a one-item
+stream; the app then knows the whole reply before it has to send anything and
+paces it exactly.
+
+When Home Assistant stops reading a reply — the pipeline was cancelled, the
+satellite went away — the integration tells the app, and the model stops
+rendering at its next step rather than finishing for nobody.
 
 ### Talking to the app
 

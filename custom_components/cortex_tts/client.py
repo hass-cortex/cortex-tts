@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
+import json
+import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -13,16 +16,27 @@ from .models import ModelInfo, VoiceInfo
 _API_TIMEOUT = aiohttp.ClientTimeout(total=10)
 
 # Synthesis is CPU-bound and grows with the length of the text, so the limit
-# is on silence from the server rather than on the whole exchange: a stream
-# that keeps sending frames may run as long as the reply is, and one that
-# stops sending is what a stuck server looks like.
+# is on silence from the server rather than on the whole exchange: a long
+# reply may take as long as it takes, and a server that has stopped answering
+# is what a stuck one looks like.
 _SPEAK_TIMEOUT = aiohttp.ClientTimeout(sock_connect=10, sock_read=180)
-_STREAM_TIMEOUT = aiohttp.ClientTimeout(sock_connect=10, sock_read=60)
+
+# A live reply waits on two writers — the conversation agent for text and the
+# model for audio — so silence on the socket is bounded rather than the reply:
+# a model that has not produced a frame in this long is stuck, not slow.
+# attrs fields declared with `attr.ib(type=...)`, which the checker cannot
+# read as parameters; the names are aiohttp's own.
+_LIVE_TIMEOUT = aiohttp.ClientWSTimeout(
+    ws_receive=120,  # pyright: ignore[reportCallIssue]
+    ws_close=5,  # pyright: ignore[reportCallIssue]
+)
+
+_LOGGER = logging.getLogger(__name__)
 
 # The wire shape this client was written against. The server reports its own
 # in /health; a mismatch is refused at setup rather than discovered as a
 # header that reads zero or a field that raises.
-SUPPORTED_API_VERSION = 1
+SUPPORTED_API_VERSION = 3
 
 
 class CortexTTSError(Exception):
@@ -41,6 +55,79 @@ class CortexTTSError(Exception):
 
 class CortexTTSAuthError(CortexTTSError):
     """The stored key was rejected; the entry needs re-authentication."""
+
+
+class LiveSession:
+    """One reply over `/api/speak/live`: words in, audio out.
+
+    Text goes in as the writer produces it; frames come back as the server
+    renders them. The server decides when to render what, so nothing here
+    splits, groups or holds — it forwards, and it makes sure the server hears
+    when the listener has gone.
+    """
+
+    def __init__(self, ws: aiohttp.ClientWebSocketResponse) -> None:
+        """Wrap an open socket on which the start frame has been sent."""
+        self._ws = ws
+        self._finished = False
+
+    async def send_text(self, text: str) -> None:
+        """Forward a piece of the reply, as the writer wrote it."""
+        if text:
+            await self._ws.send_json({"type": "text", "text": text})
+
+    async def end(self) -> None:
+        """Tell the server the reply is complete."""
+        await self._ws.send_json({"type": "end"})
+
+    async def cancel(self) -> None:
+        """Tell the server nobody is listening, so it stops rendering.
+
+        Best effort: a socket that is already closed has delivered the same
+        news, and there is no one left to report a failure to.
+        """
+        if self._finished or self._ws.closed:
+            return
+        with contextlib.suppress(aiohttp.ClientError, ConnectionError, RuntimeError):
+            await self._ws.send_json({"type": "cancel"})
+
+    async def frames(self) -> AsyncIterator[tuple[str, Any]]:
+        """Yield what the server sends, in order.
+
+        Yields:
+            ``("ready", dict)`` once the model and voice are settled,
+            ``("audio", bytes)`` per audio frame, and ``("done", dict)`` last.
+
+        Raises:
+            CortexTTSError: The server refused the reply or failed it. Its
+                own code and message, as on the HTTP routes.
+            CortexTTSAuthError: The handshake was accepted and then closed as
+                a policy violation, which is how a WebSocket says 401.
+        """
+        async for message in self._ws:
+            if message.type is aiohttp.WSMsgType.BINARY:
+                yield "audio", message.data
+                continue
+            if message.type is not aiohttp.WSMsgType.TEXT:
+                break
+            frame = json.loads(message.data)
+            kind = frame.get("type")
+            if kind == "error":
+                self._finished = True
+                raise CortexTTSError(
+                    str(frame.get("message", "the server refused the reply")),
+                    code=str(frame.get("code", "ERROR")),
+                )
+            if kind in ("ready", "batch", "done"):
+                yield kind, frame
+            if kind == "done":
+                self._finished = True
+                return
+        # Closed without a `done`: a refused key closes with policy violation
+        # before saying anything else.
+        if self._ws.close_code == 1008:
+            raise CortexTTSAuthError("authentication required", code="AUTH_REQUIRED")
+        self._finished = True
 
 
 class CortexTTSClient:
@@ -82,11 +169,9 @@ class CortexTTSClient:
             health = await self.health()
         except aiohttp.ClientError, TimeoutError, CortexTTSError:
             return "cannot_connect"
-        # A server too old to report one speaks version 1; the field was
-        # added without changing anything it describes.
-        if int(health.get("api_version", SUPPORTED_API_VERSION)) != (
-            SUPPORTED_API_VERSION
-        ):
+        # A server too old to report one speaks version 1, which has no live
+        # endpoint; it is refused the same way as any other version.
+        if int(health.get("api_version", 1)) != SUPPORTED_API_VERSION:
             return "unsupported_api"
 
         try:
@@ -195,8 +280,7 @@ class CortexTTSClient:
         Raises:
             CortexTTSError: The server rejected the request.
         """
-        body = _speak_body(
-            text,
+        body = _speak_common(
             model=model,
             voice=voice,
             normalize_text=normalize_text,
@@ -206,6 +290,7 @@ class CortexTTSClient:
             spoken_language=spoken_language,
             instruct=instruct,
         )
+        body["text"] = text
         body["format"] = audio_format
 
         async with self._session.post(
@@ -223,38 +308,41 @@ class CortexTTSClient:
             }
         return audio, stats
 
-    async def speak_stream(
+    @contextlib.asynccontextmanager
+    async def speak_live(
         self,
-        text: str,
         *,
         model: str,
         voice: str | None,
+        mode: str,
         normalize_text: bool | None = None,
         expand_numbers: bool | None = None,
         convert_script: bool | None = None,
         taiwan_readings: bool | None = None,
         spoken_language: str | None = None,
         instruct: str | None = None,
-    ) -> AsyncIterator[tuple[int, bytes]]:
-        """Synthesise text, yielding audio as the server produces it.
+    ) -> AsyncIterator[LiveSession]:
+        """Open a live reply: text forwarded as it is written, audio as rendered.
 
-        MP3, which is a bare sequence of self-describing frames: playable from
-        the first chunk, and with no length to declare. A WAV stream has to
-        declare one before the audio exists, and a general-purpose player waits
-        for whatever length it declares.
+        Leaving the block early — the consumer stopped reading — sends
+        `cancel` and closes the socket, so the server stops rendering for a
+        listener that has gone. Leaving after `done` just closes.
 
-        Yields:
-            ``(bitrate, chunk)`` in order, where bitrate is bits per second of
-            the encoded stream. A byte count over it is how long that audio
-            plays, which is what sizes a buffer without decoding anything.
+        Args:
+            mode: ``auto`` lets the server pace the reply; ``buffered`` holds
+                everything until it is rendered.
 
         Raises:
-            CortexTTSError: The server rejected the request. Errors arrive
-                before any audio does — once the response has started the
-                status is 200, so a later failure surfaces as a short stream.
+            CortexTTSError: Raised from `LiveSession.frames`, not here: the
+                server answers on the socket, after the handshake.
         """
-        body = _speak_body(
-            text,
+        ws = await self._session.ws_connect(
+            f"{self._host}/api/speak/live",
+            headers=self._headers,
+            timeout=_LIVE_TIMEOUT,
+        )
+        session = LiveSession(ws)
+        start = _speak_common(
             model=model,
             voice=voice,
             normalize_text=normalize_text,
@@ -264,25 +352,14 @@ class CortexTTSClient:
             spoken_language=spoken_language,
             instruct=instruct,
         )
-        body["format"] = STREAM_FORMAT
-
-        async with self._session.post(
-            f"{self._host}/api/speak/stream",
-            headers=self._headers,
-            json=body,
-            timeout=_STREAM_TIMEOUT,
-        ) as response:
-            await _raise_for_status(response)
-            bitrate = _header_int(response, "X-Cortex-Bitrate")
-            if bitrate <= 0:
-                raise CortexTTSError(
-                    "the server sent no bitrate, so there is no way to tell how "
-                    "much audio a chunk holds",
-                    code="malformed_stream",
-                )
-            async for chunk in response.content.iter_any():
-                if chunk:
-                    yield bitrate, chunk
+        start.update(type="start", format=STREAM_FORMAT, mode=mode)
+        try:
+            await ws.send_json(start)
+            yield session
+        finally:
+            await session.cancel()
+            with contextlib.suppress(aiohttp.ClientError, ConnectionError):
+                await ws.close()
 
 
 async def _raise_for_status(response: aiohttp.ClientResponse) -> None:
@@ -314,8 +391,7 @@ async def _error_detail(response: aiohttp.ClientResponse) -> tuple[str, str]:
     return "HTTP_ERROR", f"{response.status} {response.reason}"
 
 
-def _speak_body(
-    text: str,
+def _speak_common(
     *,
     model: str,
     voice: str | None,
@@ -326,14 +402,17 @@ def _speak_body(
     spoken_language: str | None,
     instruct: str | None,
 ) -> dict[str, Any]:
-    """Build the request both speak paths send.
+    """What both ways of asking for speech settle — the server's `SpeakCommon`.
+
+    The words and the container are the caller's to add: a file request sends
+    its text in the body, a live reply sends it in frames afterwards.
 
     The optional fields are omitted rather than sent empty: an absent switch
     is one the server decides from the language, the server refuses an
     instruction a model does not declare, and "" would be a request for
     something.
     """
-    body: dict[str, Any] = {"text": text, "model": model}
+    body: dict[str, Any] = {"model": model}
     if normalize_text is not None:
         body["normalize_text"] = normalize_text
     if expand_numbers is not None:
@@ -356,11 +435,3 @@ def _header_float(response: aiohttp.ClientResponse, name: str) -> float:
         return float(response.headers.get(name, "0"))
     except ValueError:
         return 0.0
-
-
-def _header_int(response: aiohttp.ClientResponse, name: str) -> int:
-    """Return a whole-number header, or 0 when it is absent or malformed."""
-    try:
-        return int(response.headers.get(name, "0"))
-    except ValueError:
-        return 0

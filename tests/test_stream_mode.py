@@ -16,9 +16,10 @@ from homeassistant.config_entries import ConfigSubentry
 
 from custom_components.cortex_tts.const import (
     CONF_STREAM_MODE,
+    LEGACY_STREAM_MODES,
+    STREAM_AUTO,
     STREAM_BUFFERED,
     STREAM_MODES,
-    STREAM_SENTENCE,
     SUBENTRY_TYPE,
 )
 from custom_components.cortex_tts.models import (
@@ -63,21 +64,17 @@ def _subentry(model_id: str, **data: Any) -> ConfigSubentry:
 class TestDefault:
     """Buffered, whatever the catalog claims about the model.
 
-    The default used to be derived from `rtf_hint`, a figure from one host
-    that does not predict another: a model that streamed comfortably where it
-    was measured could not keep up on a four-core HA VM, so the derivation
-    switched streaming on for models that stuttered.
+    Nothing in the catalog can decide this: a speed measured on one host does
+    not predict another, and a model that streams comfortably where it was
+    measured cannot keep up on a four-core HA VM. Only the server, from what
+    it has actually served, knows — so the client asks for `auto` and lets it.
     """
 
     def test_it_is_buffered(self) -> None:
         assert default_stream_mode() == STREAM_BUFFERED
 
     def test_it_takes_no_model(self) -> None:
-        """The catalog figure is no longer an input, so there is nothing to pass.
-
-        It used to decide, and on a host slower than the one that measured it
-        that decision was wrong.
-        """
+        """No model goes in, because no property of a model decides it."""
         import inspect
 
         assert not inspect.signature(default_stream_mode).parameters
@@ -103,11 +100,19 @@ class TestResolution:
 
     def test_models_do_not_read_each_other_s_settings(self) -> None:
         entry = _Entry(
-            _subentry("moss-nano", **{CONF_STREAM_MODE: STREAM_SENTENCE}),
+            _subentry("moss-nano", **{CONF_STREAM_MODE: STREAM_AUTO}),
             _subentry("hojo-40m", **{CONF_STREAM_MODE: STREAM_BUFFERED}),
         )
-        assert stream_mode(entry, _model("moss-nano")) == STREAM_SENTENCE
+        assert stream_mode(entry, _model("moss-nano")) == STREAM_AUTO
         assert stream_mode(entry, _model("hojo-40m")) == STREAM_BUFFERED
+
+    @pytest.mark.parametrize("legacy", sorted(LEGACY_STREAM_MODES))
+    def test_the_old_streaming_words_still_mean_streaming(self, legacy: str) -> None:
+        """`sentence` and `coalesced` were how a person asked for a reply to
+        be spoken as it was written; an entry saved then must not fall back
+        to buffered because the app now makes that choice itself."""
+        entry = _Entry(_subentry("moss-nano", **{CONF_STREAM_MODE: legacy}))
+        assert stream_mode(entry, _model()) == STREAM_AUTO
 
 
 class TestLookup:

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -23,7 +23,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.typing import StateType
 
-from .const import DOMAIN, STREAM_MODES
+from .const import DOMAIN, SPOKEN_MODES
 from .entity import device_for
 from .entity_setup import async_setup_dynamic_models
 from .models import CortexTTSRuntimeData, ModelInfo, SpeechStats
@@ -57,8 +57,14 @@ class CortexSensorDescription(SensorEntityDescription):
     that was not taken is told apart from one that came out at zero. The two
     look identical otherwise, and a real synthesis never costs zero.
     """
+    attributes_fn: Callable[[SpeechStats], dict[str, Any]] | None = None
+    """Extra attributes read out of the same synthesis, for what is too long
+    to be a state — a state is capped at 255 characters."""
 
 
+# Four describe the last thing said and sit on the device's main card: what
+# was said, how it was delivered, how long the listener waited, and whether
+# it ran dry. The rest measure the model and are diagnostic.
 DESCRIPTIONS: tuple[CortexSensorDescription, ...] = (
     CortexSensorDescription(
         key="inference_ms",
@@ -68,10 +74,7 @@ DESCRIPTIONS: tuple[CortexSensorDescription, ...] = (
         state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
         suggested_display_precision=0,
-        # Whichever of the two clocks ran. They measure different things —
-        # see SpeechStats — but only one is ever taken, so one sensor shows
-        # "how long that reply took" without claiming which clock it was.
-        value_fn=lambda stats: _measured(stats.inference_ms or stats.generation_ms, 1),
+        value_fn=lambda stats: _measured(stats.inference_ms, 1),
     ),
     CortexSensorDescription(
         key="first_audio_ms",
@@ -79,9 +82,16 @@ DESCRIPTIONS: tuple[CortexSensorDescription, ...] = (
         device_class=SensorDeviceClass.DURATION,
         native_unit_of_measurement=UnitOfTime.MILLISECONDS,
         state_class=SensorStateClass.MEASUREMENT,
-        entity_category=EntityCategory.DIAGNOSTIC,
         suggested_display_precision=0,
         value_fn=lambda stats: _measured(stats.first_audio_ms, 1),
+        # Where the wait went: loading a model that had been unloaded, the
+        # writer (a paced reply cannot render before it has finished), and
+        # the render itself. Together they explain the total.
+        attributes_fn=lambda stats: {
+            "load_ms": round(stats.load_ms),
+            "writer_ms": None if stats.writer_ms is None else round(stats.writer_ms),
+            "render_ms": round(stats.inference_ms),
+        },
     ),
     CortexSensorDescription(
         key="rtf",
@@ -108,7 +118,15 @@ DESCRIPTIONS: tuple[CortexSensorDescription, ...] = (
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda stats: stats.characters,
     ),
-    # "Did it play smoothly", as far as this side can answer it: a negative
+    # The reply itself. A state is capped at 255 characters, so the state is
+    # the opening and the attribute is the whole.
+    CortexSensorDescription(
+        key="text",
+        translation_key="text",
+        value_fn=lambda stats: stats.text[:255] or None,
+        attributes_fn=lambda stats: {"text": stats.text},
+    ),
+    # "Did it play smoothly", as far as the app can answer it: a negative
     # margin is audio that did not exist yet, which nothing downstream can
     # rescue.
     CortexSensorDescription(
@@ -117,29 +135,27 @@ DESCRIPTIONS: tuple[CortexSensorDescription, ...] = (
         device_class=SensorDeviceClass.DURATION,
         native_unit_of_measurement=UnitOfTime.SECONDS,
         state_class=SensorStateClass.MEASUREMENT,
-        entity_category=EntityCategory.DIAGNOSTIC,
         suggested_display_precision=2,
         value_fn=lambda stats: (
             None if stats.margin_seconds is None else round(stats.margin_seconds, 2)
         ),
     ),
-    # What the mode above only states the intent of: one request is one
-    # request, whatever the reply was routed as.
+    # How many requests the reply was rendered in. The key predates the
+    # name: changing it would rename every installed entity.
     CortexSensorDescription(
         key="requests",
         translation_key="requests",
         state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=lambda stats: stats.requests or None,
+        value_fn=lambda stats: stats.batches or None,
     ),
-    # The mode the reply was spoken in, which is the subentry's setting at
-    # the moment it began — a message handed over whole goes through it too.
+    # How the reply was actually spoken, as the app reported it — not the
+    # setting, which only says whether the app was allowed to choose.
     CortexSensorDescription(
         key="mode",
         translation_key="mode",
         device_class=SensorDeviceClass.ENUM,
-        options=list(STREAM_MODES),
-        entity_category=EntityCategory.DIAGNOSTIC,
+        options=list(SPOKEN_MODES),
         value_fn=lambda stats: stats.mode,
     ),
 )
@@ -186,6 +202,7 @@ class CortexTTSSensor(SensorEntity):
         )
         self._attr_device_info = device_for(config_entry.entry_id, model)
         self._attr_native_value = None
+        self._attr_extra_state_attributes = {}
 
     @callback
     def handle_speech_start(self) -> None:
@@ -196,6 +213,7 @@ class CortexTTSSensor(SensorEntity):
         both described the same utterance.
         """
         self._attr_native_value = None
+        self._attr_extra_state_attributes = {}
         if self.hass is not None:
             self.async_write_ha_state()
 
@@ -221,6 +239,10 @@ class CortexTTSSensor(SensorEntity):
             return
 
         self._attr_native_value = self.entity_description.value_fn(stats)
+        if self.entity_description.attributes_fn is not None:
+            self._attr_extra_state_attributes = self.entity_description.attributes_fn(
+                stats
+            )
 
         if self.hass is not None:
             self.async_write_ha_state()

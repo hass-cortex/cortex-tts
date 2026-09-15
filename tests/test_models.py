@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from custom_components.cortex_tts.const import STREAM_BUFFERED
+from custom_components.cortex_tts.const import STREAM_WHOLE
 from custom_components.cortex_tts.models import ModelInfo, SpeechStats, VoiceInfo
 
 
@@ -29,7 +29,7 @@ class TestSpeechStats:
         stats = SpeechStats(success=False, language="zh-TW")
         assert stats.inference_ms == 0.0
         assert stats.first_audio_ms == 0.0
-        assert stats.mode == STREAM_BUFFERED
+        assert stats.mode == STREAM_WHOLE
 
 
 class TestVoiceInfo:

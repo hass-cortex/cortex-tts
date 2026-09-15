@@ -8,13 +8,13 @@ from typing import TYPE_CHECKING
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 
 from .const import (
-    CONF_HEAD_START,
     CONF_STREAM_MODE,
-    DEFAULT_HEAD_START,
     DOMAIN,
-    MAX_HEAD_START,
+    LEGACY_STREAM_MODES,
+    STREAM_AUTO,
     STREAM_BUFFERED,
     STREAM_MODES,
+    STREAM_WHOLE,
     SUBENTRY_TYPE,
 )
 
@@ -75,36 +75,46 @@ class SpeechStats:
 
     success: bool
     characters: int = 0
+    text: str = ""
+    """The reply as it was handed to the app, whole. Carried as an attribute
+    rather than a state: a state is capped at 255 characters and a reply is
+    often longer."""
     audio_seconds: float = 0.0
     inference_ms: float = 0.0
-    """What the model cost, as the server measured it. Absent when streaming:
-    the measurement headers are gone before the first sample exists."""
-    generation_ms: float = 0.0
-    """Wall-clock from request to last frame, measured on this side. Not the
-    same quantity as `inference_ms` — nothing throttles the read, so for a
-    stream the two coincide, but the clock here is a wait and not a cost."""
+    """What the model was busy for, as the app measured it — the response
+    headers of a whole reply, the `done` frame of a live one. Never this
+    side's clock, which spans the writer and the opening hold as well."""
     rtf: float = 0.0
     first_audio_ms: float = 0.0
     """Request to the first frame of audio — what the listener actually waits."""
+    load_ms: float = 0.0
+    """Time spent making the model resident before this reply could start,
+    as the app measured it. Zero when it was already loaded; the whole of a
+    long first-audio after an idle unload."""
+    writer_ms: float | None = None
+    """How long the writer took to finish the reply, as the app measured it
+    between the first frame and `end`. The part of `first_audio_ms` that is
+    the conversation agent's, not the app's; None for a reply handed over
+    whole, which had no writer to wait for."""
     language: str = ""
     voice: str = ""
     margin_seconds: float | None = None
-    """The least audio the listener still held, in seconds, when a chunk of
-    the reply arrived.
+    """The least audio the listener still held, in seconds, as the app
+    measured it at the moment each piece of the reply left.
 
-    Opens at the head start and falls whenever rendering is slower than
-    playback. Negative means this side ran dry: no downstream buffer could
-    have covered it, because the audio did not exist yet. Positive means it
-    did not, and a stutter the listener heard came from somewhere else. A
-    reply delivered in one piece never had a late chunk, so it stays None."""
-    mode: str = STREAM_BUFFERED
-    """How this reply reached the speaker — one of `STREAM_MODES`. The mode
-    the model was set to when the reply began; Home Assistant routes every
-    reply through it, a message handed over whole included."""
-    requests: int = 0
-    """How many times the server was asked, which is the shape the mode
-    above only describes the intent of: a single-sentence reply spoken in
-    groups is one group of one, and reads no differently from buffered."""
+    Negative means the listener ran dry: no downstream buffer could have
+    covered it, because the audio did not exist yet. Positive means it did
+    not, and a stutter the listener heard came from somewhere else. A reply
+    delivered whole never had a piece that could be late, so it stays None."""
+    mode: str = STREAM_WHOLE
+    """How this reply was actually spoken — one of `SPOKEN_MODES`, as the app
+    reported it. Not the setting: a model set to `auto` is spoken whole,
+    streamed or paced per reply, and this says which it was; a reply that
+    fit one request is whole under either setting."""
+    batches: int = 0
+    """How many requests the app rendered this reply in: one for a whole
+    reply, several for a live one. Which is the whole difference between the
+    spoken modes in cost, and nothing else records it."""
 
 
 @dataclass
@@ -162,31 +172,24 @@ def default_stream_mode() -> str:
     return STREAM_BUFFERED
 
 
+def stream_mode_setting(stored: object) -> str:
+    """The setting a stored value stands for, legacy spellings included."""
+    if stored in STREAM_MODES:
+        return str(stored)
+    if stored in LEGACY_STREAM_MODES:
+        return STREAM_AUTO
+    return default_stream_mode()
+
+
 def stream_mode(entry: ConfigEntry, model: ModelInfo) -> str:
     """Return the mode configured for a model, or its default.
 
     Read at synthesis time rather than cached, so editing a model's subentry
-    takes effect on the next reply instead of on the next reload.
-    """
-    subentry = model_subentry(entry, model.id)
-    if subentry is not None:
-        configured = subentry.data.get(CONF_STREAM_MODE)
-        if configured in STREAM_MODES:
-            return str(configured)
-    return default_stream_mode()
-
-
-def head_start(entry: ConfigEntry, model: ModelInfo) -> float:
-    """Seconds of audio to bank before a streamed reply starts playing.
-
-    Read at synthesis time, like `stream_mode`, and clamped: a value from a
-    hand-edited entry must not be able to hold a reply back indefinitely.
+    takes effect on the next reply instead of on the next reload. A value from
+    before the app paced replies — `sentence`, `coalesced` — meant "speak it
+    as it is written", which is what `auto` means now.
     """
     subentry = model_subentry(entry, model.id)
     if subentry is None:
-        return DEFAULT_HEAD_START
-    try:
-        seconds = float(subentry.data.get(CONF_HEAD_START, DEFAULT_HEAD_START))
-    except TypeError, ValueError:
-        return DEFAULT_HEAD_START
-    return min(max(seconds, 0.0), MAX_HEAD_START)
+        return default_stream_mode()
+    return stream_mode_setting(subentry.data.get(CONF_STREAM_MODE))

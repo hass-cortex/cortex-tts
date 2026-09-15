@@ -5,7 +5,10 @@ from __future__ import annotations
 import pytest
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 
-from custom_components.cortex_tts.const import FIRST_AUDIO_FIELDS, STREAM_MODES
+from custom_components.cortex_tts.const import (
+    FIRST_AUDIO_FIELDS,
+    SPOKEN_MODES,
+)
 from custom_components.cortex_tts.models import SpeechStats
 from custom_components.cortex_tts.sensor import DESCRIPTIONS, CortexTTSSensor
 
@@ -22,7 +25,7 @@ def _stats(**overrides: object) -> SpeechStats:
         "first_audio_ms": 2289.4,
         "language": "zh-TW",
         "voice": "hojo_zh_f_01",
-        "mode": "coalesced",
+        "mode": "streaming",
     }
     return SpeechStats(**{**base, **overrides})  # type: ignore[arg-type]
 
@@ -45,9 +48,8 @@ class TestDescriptions:
     def test_first_audio_fields_name_real_sensors(self) -> None:
         assert set(_BY_KEY) >= FIRST_AUDIO_FIELDS
 
-    def test_every_sensor_is_diagnostic_and_translated(self) -> None:
+    def test_every_sensor_is_translated(self) -> None:
         for description in DESCRIPTIONS:
-            assert description.entity_category is not None
             assert description.translation_key == description.key
 
 
@@ -63,13 +65,32 @@ class TestValueFn:
         """An enum sensor whose state is not in `options` logs and shows unknown."""
         description = _BY_KEY["mode"]
         assert description.options is not None
-        for mode in STREAM_MODES:
+        for mode in SPOKEN_MODES:
             assert description.value_fn(_stats(mode=mode)) == mode
             assert mode in description.options
 
-    def test_every_mode_the_integration_can_report_is_offered(self) -> None:
-        """The sensor's list and the setting's list are the same three words."""
-        assert set(_BY_KEY["mode"].options or ()) == set(STREAM_MODES)
+    def test_the_sensor_reports_what_was_spoken_not_what_was_set(self) -> None:
+        """`auto` is a setting and never an outcome: it asks the app to choose.
+
+        `buffered` is both — a thing to ask for, and a thing the app reports
+        having done — so the two tuples do overlap there.
+        """
+        assert set(_BY_KEY["mode"].options or ()) == set(SPOKEN_MODES)
+        assert "auto" not in (_BY_KEY["mode"].options or ())
+        assert "buffered" in SPOKEN_MODES
+
+    def test_every_word_either_frame_can_send_is_an_option(self) -> None:
+        """The sensor is written twice per reply, from two vocabularies.
+
+        A `batch` frame names the plan in force before any audio exists
+        (`streaming`, `paced` or `buffered`); `done` replaces it with what
+        happened (`whole` when the reply fit one request). A value outside
+        `options` does not mislabel the reply — Core raises, and the exception
+        comes back as a 500 from `/api/tts_proxy`, so nothing plays at all.
+        """
+        batch_frame = {"streaming", "paced", "buffered"}
+        done_frame = {"whole", "streaming", "paced"}
+        assert batch_frame | done_frame <= set(_BY_KEY["mode"].options or ())
 
 
 class TestClearing:
@@ -137,25 +158,64 @@ class TestUnmeasuredIsNotZero:
         assert _BY_KEY["characters"].value_fn(SpeechStats(success=True)) == 0
 
     def test_no_request_at_all_is_not_a_request(self) -> None:
-        """Unlike characters, zero requests cannot have produced a reply."""
+        """Unlike characters, zero batches cannot have produced a reply."""
         assert _BY_KEY["requests"].value_fn(SpeechStats(success=True)) is None
 
 
 class TestRequests:
-    """What the mode sensor cannot say: whether the grouping grouped anything.
+    """How many times the app asked the model, which the mode alone cannot say.
 
     Measured over 308 production voice replies, 70% were a single sentence.
-    Each of those is one request however the model is set, and the mode alone
-    reads as though several went out.
+    Each of those is one request however the reply was paced.
     """
 
     def test_a_single_piece_reply_says_one(self) -> None:
-        stats = _stats(mode="coalesced", requests=1)
+        stats = _stats(mode="paced", batches=1)
         assert _BY_KEY["requests"].value_fn(stats) == 1
-        assert _BY_KEY["mode"].value_fn(stats) == "coalesced"
+        assert _BY_KEY["mode"].value_fn(stats) == "paced"
 
     def test_a_grouped_reply_says_how_many(self) -> None:
-        assert _BY_KEY["requests"].value_fn(_stats(requests=4)) == 4
+        assert _BY_KEY["requests"].value_fn(_stats(batches=4)) == 4
 
     def test_it_is_a_count_of_this_reply_only(self) -> None:
         assert _BY_KEY["requests"].state_class is SensorStateClass.MEASUREMENT
+
+
+class TestTheSpokenText:
+    """The reply rides on the text-length sensor as an attribute: a state is
+    capped at 255 characters and a reply is often longer."""
+
+    def test_the_reply_sensor_shows_the_opening_and_carries_the_whole(self) -> None:
+        description = _BY_KEY["text"]
+        assert description.attributes_fn is not None
+        stats = _stats(characters=600, text="好的。" * 200)
+        assert description.value_fn(stats) == ("好的。" * 200)[:255]
+        assert description.attributes_fn(stats) == {"text": "好的。" * 200}
+
+    def test_an_empty_reply_leaves_it_unknown(self) -> None:
+        assert _BY_KEY["text"].value_fn(_stats(text="")) is None
+
+    def test_first_audio_explains_itself(self) -> None:
+        description = _BY_KEY["first_audio_ms"]
+        assert description.attributes_fn is not None
+        stats = _stats(
+            first_audio_ms=11457.6, load_ms=8100.2, writer_ms=50.4, inference_ms=3253.6
+        )
+        assert description.attributes_fn(stats) == {
+            "load_ms": 8100,
+            "writer_ms": 50,
+            "render_ms": 3254,
+        }
+
+
+class TestWhatSitsOnTheMainCard:
+    """What was said and how it went are for the person; how the model
+    performed is diagnostic."""
+
+    def test_the_outcome_sensors_are_not_diagnostic(self) -> None:
+        for key in ("text", "mode", "first_audio_ms", "margin_seconds"):
+            assert _BY_KEY[key].entity_category is None, key
+
+    def test_the_measurements_are_diagnostic(self) -> None:
+        for key in ("inference_ms", "rtf", "requests", "audio_seconds", "characters"):
+            assert _BY_KEY[key].entity_category is not None, key

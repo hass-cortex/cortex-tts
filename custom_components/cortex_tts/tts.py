@@ -6,7 +6,7 @@ import asyncio
 import contextlib
 import logging
 import time
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any, TypedDict
 
 import aiohttp
@@ -23,11 +23,9 @@ from homeassistant.components.tts import (
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
-from sentence_stream import SentenceBoundaryDetector
 
-from .client import CortexTTSAuthError, CortexTTSClient, CortexTTSError
+from .client import CortexTTSAuthError, CortexTTSClient, CortexTTSError, LiveSession
 from .const import (
-    ASSUMED_DEFICIT,
     CONF_CONVERT_SCRIPT,
     CONF_EXPAND_NUMBERS,
     CONF_NORMALIZE_TEXT,
@@ -35,10 +33,10 @@ from .const import (
     CONF_TAIWAN_READINGS,
     DOMAIN,
     FIRST_AUDIO_FIELDS,
-    MAX_REQUEST_SECONDS,
     STREAM_BUFFERED,
-    STREAM_COALESCED,
     STREAM_FORMAT,
+    STREAM_WHOLE,
+    TEXT_FIELDS,
 )
 from .entity import device_for
 from .entity_setup import async_setup_dynamic_models
@@ -48,10 +46,8 @@ from .models import (
     SpeechStats,
     VoiceInfo,
     entity_unique_id,
-    head_start,
     stream_mode,
 )
-from .text import audio_seconds, deliverable
 
 if TYPE_CHECKING:
     from . import CortexTTSConfigEntry
@@ -108,181 +104,6 @@ def _default_language(supported: list[str]) -> str:
         if tag in supported:
             return tag
     return supported[0] if supported else "zh"
-
-
-def _rtf(elapsed_ms: float, audio_seconds: float) -> float:
-    """Return inference time over audio length; 0.0 when there is no audio."""
-    if not audio_seconds:
-        return 0.0
-    return round(elapsed_ms / 1000 / audio_seconds, 3)
-
-
-class _HeadStart:
-    """Banks the opening seconds of a stream before any of it is sent.
-
-    A model that renders slower than its audio plays loses ground for the
-    whole reply and never wins it back — measured on MOSS-TTS-Nano at 1.045x,
-    a forty-second reply leaves the player 1.8 s short. Nothing downstream can
-    repair that, because the audio genuinely is not ready yet. What can be
-    changed is *when* the player starts: hand it the difference up front and
-    it has the rest of the reply to spend it.
-
-    The WAV header is banked too, so a player cannot start on a header whose
-    audio is still seconds away.
-
-    The bank is sized for the longest reply, and most replies are shorter.
-    `shorten_for` is how a reply that is plainly too short to need one gets
-    out of paying for it.
-    """
-
-    __slots__ = ("_remaining", "_held", "banked")
-
-    def __init__(self, seconds: float) -> None:
-        self._remaining = seconds
-        self.banked = 0.0
-        """Seconds of audio held back, which is what the opening release carries."""
-        self._held: list[bytes] = []
-
-    @property
-    def is_open(self) -> bool:
-        """Whether audio now goes straight out."""
-        return self._remaining <= 0.0
-
-    def shorten_for(self, seconds: float) -> None:
-        """Lower the bank to what a reply this long can lose.
-
-        Called once the whole reply is known, which is most of the time: a
-        caller that hands over a finished message, or a writer that finished
-        before synthesis caught up. Never raises the bank — a reply longer
-        than expected keeps what was configured.
-        """
-        needed = ASSUMED_DEFICIT * seconds
-        self._remaining = min(self._remaining, max(0.0, needed - self.banked))
-
-    def feed(self, chunk: bytes, seconds: float) -> list[bytes]:
-        """Return what may be sent now, which is nothing until the bank fills."""
-        if self._remaining <= 0.0:
-            return [chunk]
-        self._held.append(chunk)
-        self.banked += seconds
-        self._remaining -= seconds
-        if self._remaining > 0.0:
-            return []
-        return self.flush()
-
-    def flush(self) -> list[bytes]:
-        """Release whatever is held. A reply shorter than the bank ends here."""
-        held, self._held = self._held, []
-        self._remaining = 0.0
-        return held
-
-
-class _Delivery:
-    """Watches a stream go out, so "was it smooth" stops being an opinion.
-
-    `margin` is the least audio a listener still held, in seconds: everything
-    sent before a chunk, minus everything played since the first chunk
-    started the reply. It opens at the banked head start and falls whenever
-    rendering runs slower than playback. Negative means the listener ran dry
-    — the samples did not exist yet, and no downstream buffer could have
-    covered it.
-
-    The arriving chunk is not counted as held, because audio arriving now
-    cannot fill a silence that has already been heard.
-    """
-
-    __slots__ = ("_started", "_audio", "margin")
-
-    def __init__(self) -> None:
-        self._started: float | None = None
-        self._audio = 0.0
-        self.margin: float | None = None
-        """Unmeasured until a second chunk exists to arrive late."""
-
-    def sent(self, seconds: float) -> None:
-        """Record that this much audio has now left."""
-        now = time.perf_counter()
-        if self._started is None:
-            # Playback starts here, so nothing has been consumed yet.
-            self._started = now
-        else:
-            lead = self._audio - (now - self._started)
-            self.margin = lead if self.margin is None else min(self.margin, lead)
-        self._audio += seconds
-
-
-async def _coalesced(
-    sentences: AsyncIterator[str],
-) -> AsyncGenerator[tuple[str, float]]:
-    """Group sentences into requests of a size the model renders well.
-
-    There is a cliff on either side of this. One sentence per request makes
-    the server pay a fresh prefill for every sentence — on MOSS-TTS-Nano that
-    is 0.37 s of dead air per boundary, measured at 41% behind playback for a
-    reply of short sentences. One request for the whole reply removes those,
-    but the model attends over everything it has generated so far, so the bill
-    grows with the square of the request: 17.8% behind for a 55-second story
-    in one go, against 6.5% for the same story in two.
-
-    So a batch takes everything that arrived while the last request was
-    streaming, up to `MAX_REQUEST_SECONDS` of audio, and leaves the rest for
-    the next one. A slow writer still degrades to one sentence per request,
-    which is all there is to send.
-
-    Yields each batch with the length of the whole reply once the writer has
-    finished, which is what lets a head start be sized against a length that
-    is known rather than guessed. Zero while the reply is still being written.
-    """
-    queue: asyncio.Queue[str | None] = asyncio.Queue()
-
-    async def read_ahead() -> None:
-        try:
-            async for sentence in sentences:
-                queue.put_nowait(sentence)
-        finally:
-            queue.put_nowait(None)
-
-    reader = asyncio.create_task(read_ahead())
-    pending: list[str] = []
-    finished = False
-    try:
-        while True:
-            if not pending:
-                first = await queue.get()
-                if first is None:
-                    break
-                pending.append(first)
-            # Everything already waiting arrived while the last request was
-            # streaming; taking it now is what removes that request's boundary.
-            while not queue.empty():
-                nxt = queue.get_nowait()
-                if nxt is None:
-                    finished = True
-                    break
-                pending.append(nxt)
-
-            reply_seconds = (
-                sum(audio_seconds(part) for part in pending) if finished else 0.0
-            )
-
-            batch: list[str] = []
-            size = 0.0
-            # Always take one: every piece arrives already within the limit,
-            # so the only way one can exceed it is text this measurement has
-            # never seen, and it still has to be spoken.
-            while pending and (
-                not batch or size + audio_seconds(pending[0]) <= MAX_REQUEST_SECONDS
-            ):
-                size += audio_seconds(pending[0])
-                batch.append(pending.pop(0))
-            yield "".join(batch), reply_seconds
-
-            if finished and not pending:
-                break
-    finally:
-        reader.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await reader
 
 
 class SpeakFields(TypedDict):
@@ -392,11 +213,12 @@ class CortexTTSEntity(TextToSpeechEntity):
         """Return whether this model should speak before the reply is finished.
 
         Home Assistant's name for the hook is about *text* streaming in; what
-        it decides here is whether audio goes out before the text is complete.
-        The answer is this model's own setting, in its own subentry, buffered
-        until someone changes it. It routes every reply, including one handed
-        over whole: Home Assistant wraps a finished message in a one-item
-        stream when this returns true.
+        it decides here is whether the reply goes to the app while it is still
+        being written, for the app to pace. The answer is this model's own
+        setting, in its own subentry, buffered until someone changes it. It
+        routes every reply, including one handed over whole: Home Assistant
+        wraps a finished message in a one-item stream when this returns true,
+        and the app then knows the whole reply before it has to send anything.
         """
         return self._stream_mode() != STREAM_BUFFERED
 
@@ -540,6 +362,7 @@ class CortexTTSEntity(TextToSpeechEntity):
             SpeechStats(
                 success=True,
                 characters=len(message),
+                text=message,
                 audio_seconds=stats.get("audio_seconds", 0.0),
                 inference_ms=stats.get("inference_ms", 0.0),
                 rtf=stats.get("rtf", 0.0),
@@ -549,8 +372,8 @@ class CortexTTSEntity(TextToSpeechEntity):
                 first_audio_ms=(time.perf_counter() - started) * 1000,
                 language=language,
                 voice=str(options.get(ATTR_VOICE) or ""),
-                mode=STREAM_BUFFERED,
-                requests=1,
+                mode=STREAM_WHOLE,
+                batches=1,
             )
         )
         _LOGGER.debug(
@@ -567,166 +390,145 @@ class CortexTTSEntity(TextToSpeechEntity):
     ) -> TTSAudioResponse:
         """Speak a reply while it is still being written.
 
-        MP3, so there is no length to declare before the audio exists and no
-        container to reopen at each request boundary — the frames of one
-        request follow the frames of the last and any decoder carries on. See
+        MP3, so there is no length to declare before the audio exists. See
         `STREAM_FORMAT`.
         """
-        return TTSAudioResponse(STREAM_FORMAT, self._stream_sentences(request))
+        return TTSAudioResponse(STREAM_FORMAT, self._stream_live(request))
 
-    async def _stream_sentences(
-        self, request: TTSAudioRequest
-    ) -> AsyncGenerator[bytes]:
-        """Synthesise the reply as it is written, as one continuous stream.
+    async def _stream_live(self, request: TTSAudioRequest) -> AsyncGenerator[bytes]:
+        """Forward the reply to the app as it is written; play what comes back.
 
-        What goes into each request is the mode's business: one sentence, or
-        everything that arrived while the last request was still streaming.
+        The app decides when to render what, how much to hold before the
+        first sound, and whether to stream at all — it holds the measurements
+        of its own host. What is decided here is only what this side can
+        know: the words, as they arrive, and that the listener is still there.
+        Leaving this generator early — Home Assistant closing it — sends the
+        app `cancel`, so the model stops rendering for nobody.
         """
-        detector = SentenceBoundaryDetector()
         fields = self._speak_fields(request.language, request.options)
         voice = request.options.get(ATTR_VOICE)
-        produced = False
-        characters = 0
-        audio_seconds = 0.0
-        sent = 0
         self._begin_speech()
         started = time.perf_counter()
+        characters = 0
+        spoken: list[str] = []
         first_audio_ms = 0.0
+        heard = False
+        planned: str | None = None
+        done: dict[str, Any] | None = None
 
-        async def _sentences() -> AsyncGenerator[str]:
-            """Yield speakable pieces as the reply is written.
-
-            A sentence longer than a request may be is cut here rather than
-            in either mode, so both of them inherit the same limit: the
-            run-on sentence is the one shape that neither mode could deliver
-            in time, because it arrives as a single lump whatever is done
-            with it afterwards.
-            """
+        async def forward(session: LiveSession) -> None:
+            nonlocal characters
             async for chunk in request.message_gen:
-                for sentence in detector.add_chunk(chunk):
-                    for piece in deliverable(sentence, MAX_REQUEST_SECONDS):
-                        yield piece
-            if tail := detector.finish():
-                for piece in deliverable(tail, MAX_REQUEST_SECONDS):
-                    yield piece
+                characters += len(chunk)
+                spoken.append(chunk)
+                await session.send_text(chunk)
+            await session.end()
+            # The words are known now; the audio may be a long way off.
+            self._push_stats(
+                SpeechStats(
+                    success=True,
+                    characters=characters,
+                    text="".join(spoken),
+                    language=request.language,
+                    voice=str(voice or ""),
+                ),
+                TEXT_FIELDS,
+            )
 
-        mode = self._stream_mode()
-        bank = _HeadStart(head_start(self._config_entry, self._model))
-        delivery = _Delivery()
-        sentences = _sentences()
-        requests = (
-            _coalesced(sentences)
-            if mode == STREAM_COALESCED
-            # One sentence per request never knows how much more is coming,
-            # so it can never shorten the bank.
-            else ((sentence, 0) async for sentence in sentences)
-        )
+        try:
+            async with self._client.speak_live(
+                model=self._model.id,
+                voice=voice,
+                mode=self._stream_mode(),
+                **fields,
+            ) as session:
+                forwarder = asyncio.create_task(forward(session))
+                try:
+                    async for kind, payload in session.frames():
+                        if kind == "batch":
+                            # The plan in force, before any audio: shown at
+                            # the first frame and corrected by `done` — a
+                            # reply that turns out to fit one request is
+                            # spoken whole whatever was planned.
+                            planned = str(payload.get("mode") or "") or None
+                        elif kind == "audio":
+                            if not heard:
+                                heard = True
+                                # Measured at the first byte that arrives: the
+                                # app's opening hold is part of what the
+                                # listener waits, and it is over by now.
+                                first_audio_ms = (time.perf_counter() - started) * 1000
+                                self._push_stats(
+                                    SpeechStats(
+                                        success=True,
+                                        first_audio_ms=round(first_audio_ms, 1),
+                                        mode=planned or STREAM_WHOLE,
+                                        language=request.language,
+                                        voice=str(voice or ""),
+                                    ),
+                                    FIRST_AUDIO_FIELDS
+                                    if planned
+                                    else FIRST_AUDIO_FIELDS - {"mode"},
+                                )
+                            yield payload
+                        elif kind == "done":
+                            done = payload
+                finally:
+                    # A forwarder still running means the reply ended before
+                    # the writer did — the listener left, or the app failed.
+                    if not forwarder.done():
+                        forwarder.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await forwarder
+        except CortexTTSError as err:
+            raise self._failed(err, request.language, "synthesis_failed") from err
+        except (aiohttp.ClientError, TimeoutError) as err:
+            raise self._failed(err, request.language, "cannot_connect") from err
 
-        async for text, reply_seconds in requests:
-            if not text.strip():
-                continue
-            if sent == 0 and reply_seconds:
-                # The writer had finished before the first request went out,
-                # so how much this reply can lose is arithmetic rather than a
-                # guess — even when it takes several requests to say it.
-                bank.shorten_for(reply_seconds)
-            # How many requests a reply took is the whole difference between
-            # the streaming modes, and nothing else records it.
-            sent += 1
-
-            # The server streams within a request too, so the first audio
-            # arrives partway through the first sentence rather than at the end
-            # of it. A model that cannot do that sends the whole request as one
-            # chunk.
-            try:
-                async for bitrate, frames in self._client.speak_stream(
-                    text,
-                    model=self._model.id,
-                    voice=voice,
-                    **fields,
-                ):
-                    produced = True
-                    # A constant bitrate is what turns a byte count into a
-                    # duration; nothing here decodes the audio.
-                    seconds = len(frames) * 8 / bitrate
-                    audio_seconds += seconds
-                    was_open = bank.is_open
-                    ready = bank.feed(frames, seconds)
-                    if ready and not first_audio_ms:
-                        # Measured at the first byte that leaves rather than
-                        # the first that arrives: a banked head start is part
-                        # of what the listener waits.
-                        first_audio_ms = (time.perf_counter() - started) * 1000
-                        # Reporting it here rather than with the totals is the
-                        # difference between seeing it while the reply is
-                        # still playing and seeing it a reply later.
-                        self._push_stats(
-                            SpeechStats(
-                                success=True,
-                                first_audio_ms=round(first_audio_ms, 1),
-                                language=request.language,
-                                voice=str(voice or ""),
-                                mode=mode,
-                            ),
-                            FIRST_AUDIO_FIELDS,
-                        )
-                    if ready:
-                        # The opening release carries everything banked; every
-                        # one after it carries just this chunk.
-                        delivery.sent(seconds if was_open else bank.banked)
-                    for chunk in ready:
-                        yield chunk
-            except CortexTTSError as err:
-                if err.code == "EMPTY_TEXT":
-                    # Nothing survived the text pipeline — a line of bare
-                    # punctuation. The rest of the reply is still worth saying.
-                    continue
-                raise self._failed(err, request.language, "synthesis_failed") from err
-            except (aiohttp.ClientError, TimeoutError) as err:
-                raise self._failed(err, request.language, "cannot_connect") from err
-
-            characters += len(text)
-
-        if remainder := bank.flush():
-            # The reply was shorter than the bank, so it never released.
-            if not first_audio_ms:
-                first_audio_ms = (time.perf_counter() - started) * 1000
-            for chunk in remainder:
-                yield chunk
-
-        if not produced:
+        if done is None or not done.get("audio_seconds"):
             # Nothing was synthesised — an empty reply, or one that was all
-            # punctuation.
+            # punctuation — or the session ended without saying how it went.
             _LOGGER.debug("nothing to speak on %s", self._model.id)
             return
 
-        # Reported as generation time, not inference time: see models.py.
-        elapsed_ms = (time.perf_counter() - started) * 1000
+        # The app's figures, not this side's clock: this side's wall time
+        # spans the writer and the opening hold, which is a wait, not a cost.
+        audio_seconds = float(done.get("audio_seconds", 0.0))
+        render_ms = float(done.get("render_ms", 0.0))
+        writer_ms = done.get("writer_ms")
+        load_ms = float(done.get("load_ms", 0.0))
+        rtf = done.get("rtf")
+        margin = done.get("min_lead_s")
+        mode = str(done.get("mode", STREAM_WHOLE))
+        batches = int(done.get("batches", 0))
         self._push_stats(
             SpeechStats(
                 success=True,
                 characters=characters,
+                text="".join(spoken),
                 audio_seconds=round(audio_seconds, 3),
-                generation_ms=round(elapsed_ms, 1),
-                rtf=_rtf(elapsed_ms, audio_seconds),
+                inference_ms=round(render_ms, 1),
+                rtf=float(rtf) if rtf is not None else 0.0,
                 first_audio_ms=round(first_audio_ms, 1),
+                load_ms=load_ms,
+                writer_ms=float(writer_ms) if writer_ms is not None else None,
                 language=request.language,
                 voice=str(voice or ""),
                 mode=mode,
-                requests=sent,
-                margin_seconds=delivery.margin,
+                batches=batches,
+                margin_seconds=None if margin is None else float(margin),
             )
         )
         _LOGGER.debug(
-            "%s %d chars on %s in %d request(s) as %.2fs of audio in %.0fms "
-            "(RTF %.2f, first %.0fms, margin %+.2fs)",
+            "%s %d chars on %s in %d batch(es) as %.2fs of audio, rendered in "
+            "%.0fms (RTF %s, first %.0fms, margin %+.2fs)",
             mode,
             characters,
             self._model.id,
-            sent,
+            batches,
             audio_seconds,
-            elapsed_ms,
-            _rtf(elapsed_ms, audio_seconds),
+            render_ms,
+            rtf,
             first_audio_ms,
-            delivery.margin if delivery.margin is not None else 0.0,
+            float(margin) if margin is not None else 0.0,
         )

@@ -17,7 +17,11 @@ import pytest
 import yaml
 
 from custom_components.cortex_tts.config_flow import ModelSubentryFlow
-from custom_components.cortex_tts.const import CONF_STREAM_MODE, STREAM_MODES
+from custom_components.cortex_tts.const import (
+    CONF_STREAM_MODE,
+    SPOKEN_MODES,
+    STREAM_MODES,
+)
 from custom_components.cortex_tts.sensor import DESCRIPTIONS
 
 ROOT = Path(__file__).resolve().parent.parent / "custom_components/cortex_tts"
@@ -115,7 +119,7 @@ class TestStreamModeWords:
 
     def test_the_sensor_names_every_mode_it_can_report(self) -> None:
         states = STRINGS["entity"]["sensor"]["mode"]["state"]
-        assert set(states) == set(STREAM_MODES)
+        assert set(states) == set(SPOKEN_MODES)
 
 
 class TestSensorNames:
