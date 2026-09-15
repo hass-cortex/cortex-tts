@@ -52,10 +52,9 @@ diagnostic sensors.
   Assistant serves an integration's own `brand/` icons, which is where this
   one's live; it also brings the Python 3.14 the code is written for.
 - **Cortex TTS app 0.6.0 or newer**, which speaks API version 3. The
-  integration reads `api_version` from the app's `/health` and refuses to set
-  up with "unsupported API" when the two sides disagree — update whichever is
-  older. An app too old to report `style_instruction` simply offers no
-  `instruct` option; nothing else changes.
+  integration reads `api_version` from the app's `/health` and sets up only
+  against that exact version, refusing anything else with "unsupported API" —
+  update whichever side is older.
 
 ## Setup
 
@@ -116,17 +115,17 @@ One **TTS entity** per downloaded model, named after the model —
 one for OmniVoice — plus nine sensors describing the reply it
 spoke most recently:
 
-| Sensor                  | Entity id                            | Unit | What it says                                                                                                                                                                      |
-| ----------------------- | ------------------------------------ | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Text**                | `sensor.<model>_text`                | —    | What was said, as handed to the app; the state is the first 255 characters, the `text` attribute the whole                                                                        |
-| **Time to first audio** | `sensor.<model>_time_to_first_audio` | ms   | Request in, first frame out — the wait a listener feels                                                                                                                           |
-| **Render time**         | `sensor.<model>_render_time`         | ms   | What the model was busy for, as the app measured it — never this side's clock, which also spans the writer and the opening hold                                                   |
-| **Audio length**        | `sensor.<model>_audio_length`        | s    | How long the reply plays for                                                                                                                                                      |
-| **Real-time factor**    | `sensor.<model>_real_time_factor`    | —    | This reply's render time over its audio length; below 1 outruns playback. One reply, fixed cost included — the app's own model card fits that cost apart and reads a little lower |
-| **Text length**         | `sensor.<model>_text_length`         | —    | Characters in the reply                                                                                                                                                           |
-| **Playback margin**     | `sensor.<model>_playback_margin`     | s    | The least audio the listener still held as the reply left the app; negative means it had run dry                                                                                  |
-| **Render batches**      | `sensor.<model>_render_batches`      | —    | How many requests the app rendered the reply in: one for a whole reply, several for a live one                                                                                    |
-| **Delivery mode**       | `sensor.<model>_delivery_mode`       | —    | `Whole`, `Streaming` or `Paced` — how the app actually spoke the reply: one request, or several streamed or paced, which a model set to automatic decides per reply               |
+| Sensor                  | Entity id                            | Unit | What it says                                                                                                                                                                                                                 |
+| ----------------------- | ------------------------------------ | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Text**                | `sensor.<model>_text`                | —    | What was said, as handed to the app; the state is the first 255 characters, the `text` attribute the whole                                                                                                                   |
+| **Time to first audio** | `sensor.<model>_time_to_first_audio` | ms   | Request in, first frame out — the wait a listener feels. Three attributes split it: `load_ms` where the model had to be made resident, `writer_ms` for the agent's own writing, `render_ms` for the synthesis                |
+| **Render time**         | `sensor.<model>_render_time`         | ms   | What the model was busy for, as the app measured it — never this side's clock, which also spans the writer and the opening hold                                                                                              |
+| **Audio length**        | `sensor.<model>_audio_length`        | s    | How long the reply plays for                                                                                                                                                                                                 |
+| **Real-time factor**    | `sensor.<model>_real_time_factor`    | —    | This reply's render time over its audio length; below 1 outruns playback. One reply, its per-request fixed cost included — the app's own card shows the fitted slope with that cost held apart, so it reads at or under this |
+| **Text length**         | `sensor.<model>_text_length`         | —    | Characters in the reply                                                                                                                                                                                                      |
+| **Playback margin**     | `sensor.<model>_playback_margin`     | s    | The least audio the listener still held as the reply left the app; negative means it had run dry                                                                                                                             |
+| **Render batches**      | `sensor.<model>_render_batches`      | —    | How many requests the app rendered the reply in: one for a whole reply, several for a live one                                                                                                                               |
+| **Delivery mode**       | `sensor.<model>_delivery_mode`       | —    | How the app is speaking the reply, then how it spoke it: `Streaming`, `Paced` or `Buffered` while it is in flight, replaced when the reply ends by `Whole` for one that fitted a single request                              |
 
 Text, Delivery mode, Time to first audio and Playback margin sit on the
 device's main card — what was said and how it went. The rest measure the model
@@ -141,9 +140,10 @@ two replies are never mixed. All of them clear when a new reply begins: a
 failed synthesis leaves them unknown rather than zero, because zero would read
 as "instant".
 
-A live reply settles its numbers at two moments — the wait is known when the
-first frame arrives, the totals and the mode only once the app reports how it
-went — so each lands as soon as it becomes true.
+A live reply settles its numbers at three moments — the text when the writer
+finishes, the wait and the delivery mode when the first frame arrives, the
+totals when the app reports how it went — so each lands as soon as it becomes
+true.
 
 ## Speaking
 
@@ -282,9 +282,9 @@ for the first bytes of a long reply and fail to open it, while the audio itself
 is perfectly fine. Assist pipelines and voice satellites take streams without
 trouble.
 
-Each model's **Last synthesis mode** sensor reports how the app actually spoke
-the last reply — streamed, paced or buffered — which a model set to automatic
-decides per reply. Home Assistant routes every reply through the setting, a
+Each model's **Delivery mode** sensor reports how the app actually spoke the
+last reply — whole, streamed or paced — which a model set to automatic decides
+per reply. Home Assistant routes every reply through the setting, a
 whole message handed to `tts.speak` included, which it wraps as a one-item
 stream; the app then knows the whole reply before it has to send anything and
 paces it exactly.
@@ -302,9 +302,10 @@ rendering at its next step rather than finishing for nobody.
   reply the same way. On Home Assistant OS the Supervisor re-announces the app
   with the new key, and that updates the entry with nothing to type.
 - The limits are on silence from the server rather than on the whole exchange,
-  because synthesis is CPU-bound and grows with the text: 10 s to connect, then
-  180 s between bytes for a buffered reply and 60 s for a streamed one. Other
-  requests to the app time out at 10 s.
+  because synthesis is CPU-bound and grows with the text: 10 s to connect and
+  180 s between bytes for a reply fetched whole, and 120 s between frames on
+  the live socket — a model that has produced nothing for that long is stuck,
+  not slow. Other requests to the app time out at 10 s.
 
 ## Troubleshooting
 
