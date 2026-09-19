@@ -51,10 +51,11 @@ diagnostic sensors.
 - **Home Assistant 2026.3.0 or newer.** 2026.3 is the release from which Home
   Assistant serves an integration's own `brand/` icons, which is where this
   one's live; it also brings the Python 3.14 the code is written for.
-- **Cortex TTS app 0.6.0 or newer**, which speaks API version 3. The
+- **A Cortex TTS app speaking API version 4.** Not a release number: the
   integration reads `api_version` from the app's `/health` and sets up only
-  against that exact version, refusing anything else with "unsupported API" —
-  update whichever side is older.
+  against that exact version, refusing anything else — older or newer — with
+  "unsupported API". The app's own page reports what it speaks; update
+  whichever side is behind.
 
 ## Setup
 
@@ -115,17 +116,17 @@ One **TTS entity** per downloaded model, named after the model —
 one for OmniVoice — plus nine sensors describing the reply it
 spoke most recently:
 
-| Sensor                  | Entity id                            | Unit | What it says                                                                                                                                                                                                                 |
-| ----------------------- | ------------------------------------ | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Text**                | `sensor.<model>_text`                | —    | What was said, as handed to the app; the state is the first 255 characters, the `text` attribute the whole                                                                                                                   |
-| **Time to first audio** | `sensor.<model>_time_to_first_audio` | ms   | Request in, first frame out — the wait a listener feels. Three attributes split it: `load_ms` where the model had to be made resident, `writer_ms` for the agent's own writing, `render_ms` for the synthesis                |
-| **Render time**         | `sensor.<model>_render_time`         | ms   | What the model was busy for, as the app measured it — never this side's clock, which also spans the writer and the opening hold                                                                                              |
-| **Audio length**        | `sensor.<model>_audio_length`        | s    | How long the reply plays for                                                                                                                                                                                                 |
-| **Real-time factor**    | `sensor.<model>_real_time_factor`    | —    | This reply's render time over its audio length; below 1 outruns playback. One reply, its per-request fixed cost included — the app's own card shows the fitted slope with that cost held apart, so it reads at or under this |
-| **Text length**         | `sensor.<model>_text_length`         | —    | Characters in the reply                                                                                                                                                                                                      |
-| **Playback margin**     | `sensor.<model>_playback_margin`     | s    | The least audio the listener still held as the reply left the app; negative means it had run dry                                                                                                                             |
-| **Render batches**      | `sensor.<model>_render_batches`      | —    | How many requests the app rendered the reply in: one for a whole reply, several for a live one                                                                                                                               |
-| **Delivery mode**       | `sensor.<model>_delivery_mode`       | —    | How the app is speaking the reply, then how it spoke it: `Streaming`, `Paced` or `Buffered` while it is in flight, replaced when the reply ends by `Whole` for one that fitted a single request                              |
+| Sensor                  | Entity id                            | Unit | What it says                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ----------------------- | ------------------------------------ | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Text**                | `sensor.<model>_text`                | —    | What was said, as handed to the app; the state is the first 255 characters, the `text` attribute the whole                                                                                                                                                                                                                                                                                                               |
+| **Time to first audio** | `sensor.<model>_time_to_first_audio` | ms   | Request in, first frame out — the wait a listener feels. Three attributes split it: `load_ms` where the model had to be made resident, `writer_ms` for the agent's own writing, `render_ms` for the synthesis                                                                                                                                                                                                            |
+| **Render time**         | `sensor.<model>_render_time`         | ms   | What the model was busy for, as the app measured it — never this side's clock, which also spans the writer and the opening hold                                                                                                                                                                                                                                                                                          |
+| **Audio length**        | `sensor.<model>_audio_length`        | s    | How long the reply plays for                                                                                                                                                                                                                                                                                                                                                                                             |
+| **Real-time factor**    | `sensor.<model>_real_time_factor`    | —    | This reply's render time over its audio length; below 1 outruns playback. One reply, its per-request fixed cost included — the app's own card shows the fitted slope with that cost held apart, so it reads at or under this                                                                                                                                                                                             |
+| **Text length**         | `sensor.<model>_text_length`         | —    | Characters in the reply                                                                                                                                                                                                                                                                                                                                                                                                  |
+| **Playback margin**     | `sensor.<model>_playback_margin`     | s    | The least audio the listener still held as the reply left the app; negative means it had run dry                                                                                                                                                                                                                                                                                                                         |
+| **Render batches**      | `sensor.<model>_render_batches`      | —    | How many requests the app rendered the reply in: one for a whole reply, several for a live one                                                                                                                                                                                                                                                                                                                           |
+| **Delivery mode**       | `sensor.<model>_delivery_mode`       | —    | How the app is speaking the reply, then how it spoke it. In flight it is **As it was written** (`streaming`) or **Planned in advance** (`planned`); when the reply ends, one that fitted a single request is replaced by **One request** (`whole`). **Held until finished** (`buffered`) says the reply was held to the end whatever the request count, which is what a model set to **Speaking mode: buffered** reports |
 
 Text, Delivery mode, Time to first audio and Playback margin sit on the
 device's main card — what was said and how it went. The rest measure the model
@@ -233,7 +234,8 @@ an id nobody remembers.
 
 `normalize_text` and `convert_script` exist for a caller whose text is already prepared;
 turning conversion off for ordinary Traditional Chinese makes the voice
-unintelligible, and turning normalisation off leaves every digit silent. Any of
+unintelligible, and turning normalisation off leaves units, times and dates
+unread — on a Hojo model it leaves bare digits silent as well. Any of
 the four left out is answered by the app's own settings first — a rule per
 model and language on its Settings page — and only then by the pipeline.
 
@@ -248,9 +250,9 @@ in a quarter of real time and one that does not.
 Open the integration, then **Configure** on the model's row. A model cannot be
 added here — it appears by being downloaded in the app.
 
-| Setting           | Default    | Meaning                                                                                                                                                                                                                                                                                                                                                          |
-| ----------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Speaking mode** | `Buffered` | `Buffered` renders the whole reply, then plays it — the longest wait, and it never stalls. `Automatic` hands the reply to the app as it is written and lets the app pace it from what it has measured about this model on its host: streamed when the model keeps ahead of its audio, held back just long enough when it does not, whole while it is unmeasured. |
+| Setting           | Default                    | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ----------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Speaking mode** | `Wait for the whole reply` | Four answers, and the last three take the decision away from the app. **Automatic** pieces the reply out as it is written, from what it has measured about this model on its host: streamed while the model keeps ahead of its audio, planned when it does not, and planned from its own first request while it is unmeasured. **Plan the whole reply** waits for all the words and then cuts them so playback never catches the renderer — it never stalls, but on a model slower than its own audio the wait before the first word grows with the reply. **Speak as it renders** cuts the same words the other way, for the soonest first word and no wait; on a model that cannot keep ahead it stalls between sentences, audibly. **Wait for the whole reply** renders everything in one request before anything plays: the longest wait, and the only reply the model never had to cut. |
 
 A change applies to the next reply; nothing reloads.
 
@@ -283,7 +285,7 @@ is perfectly fine. Assist pipelines and voice satellites take streams without
 trouble.
 
 Each model's **Delivery mode** sensor reports how the app actually spoke the
-last reply — whole, streamed or paced — which a model set to automatic decides
+last reply — whole, streamed or planned — which a model set to automatic decides
 per reply. Home Assistant routes every reply through the setting, a
 whole message handed to `tts.speak` included, which it wraps as a one-item
 stream; the app then knows the whole reply before it has to send anything and
@@ -352,4 +354,4 @@ MIT — see [LICENSE](LICENSE).
 [app-docs]: https://github.com/hass-cortex/app-cortex-tts/blob/main/cortex-tts/DOCS.md
 [models]: https://github.com/hass-cortex/app-cortex-tts/blob/main/cortex-tts/docs/models.md
 [text]: https://github.com/hass-cortex/app-cortex-tts/blob/main/cortex-tts/docs/text-pipeline.md
-[streaming]: https://github.com/hass-cortex/app-cortex-tts/blob/main/cortex-tts/docs/streaming.md
+[streaming]: https://github.com/hass-cortex/app-cortex-tts/blob/main/cortex-tts/docs/delivery.md

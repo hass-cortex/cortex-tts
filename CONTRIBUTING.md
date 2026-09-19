@@ -3,7 +3,7 @@
 ## Setup
 
 ```bash
-uv sync
+uv sync --group dev --group test
 ```
 
 ## Before opening a pull request
