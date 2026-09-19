@@ -109,7 +109,7 @@ class SpeechStats:
     mode: str = STREAM_WHOLE
     """How this reply was actually spoken — one of `SPOKEN_MODES`, as the app
     reported it. Not the setting: a model set to `auto` is spoken whole,
-    streamed or paced per reply, and this says which it was; a reply that
+    streamed or planned per reply, and this says which it was; a reply that
     fit one request is whole under either setting."""
     batches: int = 0
     """How many requests the app rendered this reply in: one for a whole
@@ -186,7 +186,7 @@ def stream_mode(entry: ConfigEntry, model: ModelInfo) -> str:
 
     Read at synthesis time rather than cached, so editing a model's subentry
     takes effect on the next reply instead of on the next reload. A value from
-    before the app paced replies — `sentence`, `coalesced` — meant "speak it
+    before the app planned replies — `sentence`, `coalesced` — meant "speak it
     as it is written", which is what `auto` means now.
     """
     subentry = model_subentry(entry, model.id)

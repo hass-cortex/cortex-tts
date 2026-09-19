@@ -84,10 +84,11 @@
       "mode": {
         "name": "Delivery mode",
         "state": {
-          "whole": "Whole",
-          "streaming": "Streaming",
-          "paced": "Paced",
-            "buffered": "Buffered"
+          "whole": "One request",
+          "streaming": "As it was written",
+          "planned": "Planned in advance",
+          "unheld": "As fast as it renders",
+          "buffered": "Held until finished"
         }
       },
       "margin_seconds": {
@@ -108,7 +109,7 @@
             "stream_mode": "Speaking mode"
           },
           "data_description": {
-            "stream_mode": "Automatic lets the app decide for each reply, from what it has measured about this model on its own host: spoken as it is written when the model keeps ahead of its audio, held back just long enough when it does not, and rendered whole while the model is still unmeasured. Buffered renders the whole reply before any of it plays — the longest wait, and it never stalls. Every model starts buffered; switch to automatic once the real-time factor sensor has a figure."
+            "stream_mode": "Automatic lets the app decide for each reply, from what it has measured of this model on its own host: spoken as it is written when the model keeps ahead of its audio, and planned when it does not. A voice it has not heard yet borrows the dearest figures the model has, and a model it has never run at all is planned from its own first request — so nothing waits for a measurement that has not been taken.\n\nThe other three take the decision away, each giving up something different. Plan the whole reply waits for the words, then cuts them so playback never catches the renderer — it never stalls, but on a model slower than its own audio the wait before the first word grows with the reply, and can run to minutes. Speak as it renders is the same words cut the other way, cut for the soonest first word and with nothing held back; on a model that cannot keep ahead it stalls between sentences, audibly, which is the trade it offers. Nothing held back is not the same as no wait: the first request still has to render, and on a model slower than its own audio that alone can be half a minute. Wait for the whole reply renders everything in one request before anything plays: the longest wait, and the only way to get a reply the model never had to cut.\n\nEvery model starts on Wait for the whole reply. Automatic reaches the first word sooner than it, and Speak as it renders sooner than either."
           }
         }
       },
@@ -125,8 +126,10 @@
   "selector": {
     "stream_mode": {
       "options": {
-        "auto": "Automatic — the app paces each reply",
-        "buffered": "Buffered — render it all, then play"
+        "auto": "Automatic — let the app decide for each reply",
+        "planned": "Plan the whole reply — never stalls, may wait a while first",
+        "unheld": "Speak as it renders — first word as soon as one exists, stalls if it cannot keep up",
+        "buffered": "Wait for the whole reply — never stalls, longest wait"
       }
     }
   },

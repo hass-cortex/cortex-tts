@@ -196,7 +196,7 @@ class TestForwarding:
         session = _FakeSession(
             [
                 ("ready", {}),
-                ("batch", {"index": 1, "mode": "paced"}),
+                ("batch", {"index": 1, "mode": "planned"}),
                 ("audio", b"\x01"),
                 ("done", DONE),
             ]
@@ -205,7 +205,7 @@ class TestForwarding:
         async for _ in entity._stream_live(_request("一二三。")):
             pass
         early = next(s for s, f in sensors.pushed if f == FIRST_AUDIO_FIELDS)
-        assert early.mode == "paced"
+        assert early.mode == "planned"
 
     async def test_the_first_audio_is_reported_before_the_reply_ends(self) -> None:
         sensors = _Sensors()

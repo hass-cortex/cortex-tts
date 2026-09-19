@@ -36,7 +36,7 @@ _LOGGER = logging.getLogger(__name__)
 # The wire shape this client was written against. The server reports its own
 # in /health; a mismatch is refused at setup rather than discovered as a
 # header that reads zero or a field that raises.
-SUPPORTED_API_VERSION = 3
+SUPPORTED_API_VERSION = 4
 
 
 class CortexTTSError(Exception):
@@ -239,74 +239,6 @@ class CortexTTSClient:
             )
             for item in payload
         ]
-
-    async def speak(
-        self,
-        text: str,
-        *,
-        model: str,
-        voice: str | None,
-        audio_format: str = "wav",
-        normalize_text: bool | None = None,
-        expand_numbers: bool | None = None,
-        convert_script: bool | None = None,
-        taiwan_readings: bool | None = None,
-        spoken_language: str | None = None,
-        instruct: str | None = None,
-    ) -> tuple[bytes, dict[str, float]]:
-        """Synthesise text.
-
-        Args:
-            text: What to say, in whatever script the user writes.
-            model: Model id.
-            voice: Voice id, or ``None`` to let the server pick its default.
-            audio_format: Container to request.
-            normalize_text: Expand units, clock literals and dates; ``None``
-                leaves it to the server, whose rules and default say on.
-            expand_numbers: Read a bare number as a quantity too; ``None``
-                keeps the server's default, which is not to.
-            convert_script: Convert Traditional Chinese glyphs to Simplified;
-                ``None`` lets the server decide from the language.
-            taiwan_readings: Respell words Taiwan reads differently; ``None``
-                lets the server decide from the language.
-            spoken_language: Which language the model reads the text as, on
-                the models that take one. ``None`` lets the voice decide.
-            instruct: A plain-language instruction beside the voice, on the
-                one model that takes one.
-
-        Returns:
-            The encoded audio and the server's timing headers.
-
-        Raises:
-            CortexTTSError: The server rejected the request.
-        """
-        body = _speak_common(
-            model=model,
-            voice=voice,
-            normalize_text=normalize_text,
-            expand_numbers=expand_numbers,
-            convert_script=convert_script,
-            taiwan_readings=taiwan_readings,
-            spoken_language=spoken_language,
-            instruct=instruct,
-        )
-        body["text"] = text
-        body["format"] = audio_format
-
-        async with self._session.post(
-            f"{self._host}/api/speak",
-            headers=self._headers,
-            json=body,
-            timeout=_SPEAK_TIMEOUT,
-        ) as response:
-            await _raise_for_status(response)
-            audio = await response.read()
-            stats = {
-                "inference_ms": _header_float(response, "X-Cortex-Inference-Ms"),
-                "audio_seconds": _header_float(response, "X-Cortex-Audio-Seconds"),
-                "rtf": _header_float(response, "X-Cortex-Rtf"),
-            }
-        return audio, stats
 
     @contextlib.asynccontextmanager
     async def speak_live(

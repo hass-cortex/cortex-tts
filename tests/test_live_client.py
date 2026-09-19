@@ -87,7 +87,7 @@ class TestFraming:
         async def script(ws: web.WebSocketResponse, seen: dict) -> None:
             await _ready(ws)
             await _drain_text(ws, seen)
-            await ws.send_json({"type": "done", "mode": "paced", "batches": 1})
+            await ws.send_json({"type": "done", "mode": "planned", "batches": 1})
 
         async with (
             _server(script) as (client, seen),
@@ -118,6 +118,25 @@ class TestFraming:
             {"type": "end"},
         ]
         assert frames == ["ready", "done"]
+
+    async def test_the_voice_is_omitted_when_none_so_the_server_picks(self) -> None:
+        """Sending `voice: null` would ask for a voice named nothing."""
+
+        async def script(ws: web.WebSocketResponse, seen: dict) -> None:
+            await _ready(ws)
+            await _drain_text(ws, seen)
+            await ws.send_json({"type": "done", "mode": "planned", "batches": 1})
+
+        async with (
+            _server(script) as (client, seen),
+            client.speak_live(model="m", voice=None, mode="auto") as session,
+        ):
+            await session.send_text("你好。")
+            await session.end()
+            [kind async for kind, _ in session.frames()]
+
+        assert "voice" not in seen["start"]
+        assert seen["start"]["model"] == "m"
 
     async def test_audio_arrives_between_ready_and_done_in_order(self) -> None:
         async def script(ws: web.WebSocketResponse, seen: dict) -> None:
@@ -213,7 +232,7 @@ class TestLeaving:
         async def script(ws: web.WebSocketResponse, seen: dict) -> None:
             await _ready(ws)
             await _drain_text(ws, seen)
-            await ws.send_json({"type": "done", "mode": "paced", "batches": 1})
+            await ws.send_json({"type": "done", "mode": "planned", "batches": 1})
             # Anything after `done` would be a cancel; give it a moment to arrive.
             with contextlib_suppress():
                 await asyncio.wait_for(ws.receive(), 0.2)

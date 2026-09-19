@@ -42,7 +42,7 @@ async def _client(**routes: Handler) -> AsyncIterator[CortexTTSClient]:
 
 
 async def _ok(_: web.Request) -> web.Response:
-    return web.json_response({"status": "ok", "api_version": 3})
+    return web.json_response({"status": "ok", "api_version": 4})
 
 
 class TestValidate:
@@ -94,81 +94,10 @@ class TestAuth:
             assert not host.endswith("/")
 
 
-class TestSpeak:
-    @staticmethod
-    def _speaker(
-        *,
-        status: int = 200,
-        body: bytes = b"RIFF....",
-        headers: dict[str, str] | None = None,
-    ) -> Handler:
-        async def handler(_: web.Request) -> web.Response:
-            if status >= 400:
-                return web.json_response(
-                    {"code": "MODEL_NOT_READY", "message": "not downloaded"},
-                    status=status,
-                )
-            return web.Response(body=body, headers=headers or {})
-
-        return handler
-
-    async def test_the_timing_headers_come_back_as_numbers(self) -> None:
-        async with _client(
-            post_api_speak=self._speaker(
-                headers={
-                    "X-Cortex-Inference-Ms": "2283.0",
-                    "X-Cortex-Audio-Seconds": "4.22",
-                    "X-Cortex-Rtf": "0.541",
-                }
-            )
-        ) as client:
-            audio, stats = await client.speak(
-                "室內溫度是二十六度。", model="hojo-40m", voice="hojo_zh_f_01"
-            )
-        assert audio == b"RIFF...."
-        assert stats == {"inference_ms": 2283.0, "audio_seconds": 4.22, "rtf": 0.541}
-
-    async def test_a_missing_header_reads_as_zero_not_a_crash(self) -> None:
-        async with _client(post_api_speak=self._speaker()) as client:
-            _, stats = await client.speak("x", model="hojo-40m", voice=None)
-        assert stats["rtf"] == 0.0
-
-    async def test_the_servers_own_message_reaches_the_caller(self) -> None:
-        # Home Assistant surfaces this string, so it must be the app's own and
-        # not "500 Internal Server Error".
-        async with _client(post_api_speak=self._speaker(status=409)) as client:
-            with pytest.raises(CortexTTSError) as caught:
-                await client.speak("x", model="hojo-80m-clone", voice=None)
-        assert caught.value.code == "MODEL_NOT_READY"
-        assert "not downloaded" in str(caught.value)
-
-    async def test_the_voice_is_omitted_when_none_so_the_server_picks(self) -> None:
-        seen: dict[str, object] = {}
-
-        async def handler(request: web.Request) -> web.Response:
-            seen.update(await request.json())
-            return web.Response(body=b"RIFF....")
-
-        async with _client(post_api_speak=handler) as client:
-            await client.speak("你好。", model="m", voice=None)
-
-        assert "voice" not in seen
-        assert seen["model"] == "m"
-
-    async def test_a_non_json_failure_still_carries_a_code(self) -> None:
-        async def bad_gateway(_: web.Request) -> web.Response:
-            return web.Response(status=502, text="<html>bad gateway")
-
-        async with _client(post_api_speak=bad_gateway) as client:
-            with pytest.raises(CortexTTSError) as caught:
-                await client.speak("x", model="hojo-40m", voice=None)
-        assert caught.value.code == "HTTP_ERROR"
-
-
 class TestApiVersion:
     """The one number a client checks before trusting any other field."""
 
-    @pytest.mark.parametrize("version", [2, 4])
+    @pytest.mark.parametrize("version", [2, 5])
     async def test_a_server_that_reports_another_version_is_refused(
         self, version: int
     ) -> None:
@@ -190,7 +119,7 @@ class TestApiVersion:
 
     async def test_the_current_version_is_accepted(self) -> None:
         async def health(_: web.Request) -> web.Response:
-            return web.json_response({"status": "ok", "api_version": 3})
+            return web.json_response({"status": "ok", "api_version": 4})
 
         async def models(_: web.Request) -> web.Response:
             return web.json_response([])
@@ -214,6 +143,35 @@ class TestRefusals:
                 await client.list_models()
         assert caught.value.code == "AUTH_REQUIRED"
         assert not isinstance(caught.value, aiohttp.ClientError)
+
+    async def test_the_servers_own_message_reaches_the_caller(self) -> None:
+        """Home Assistant surfaces this string, so it must be the app's own.
+
+        Not "500 Internal Server Error", which says nothing a person can act
+        on. `_raise_for_status` is shared by every route that answers JSON.
+        """
+
+        async def refuse(_: web.Request) -> web.Response:
+            return web.json_response(
+                {"code": "MODEL_NOT_READY", "message": "not downloaded"}, status=409
+            )
+
+        async with _client(get_api_models=refuse) as client:
+            with pytest.raises(CortexTTSError) as caught:
+                await client.list_models()
+        assert caught.value.code == "MODEL_NOT_READY"
+        assert "not downloaded" in str(caught.value)
+
+    async def test_a_non_json_failure_still_carries_a_code(self) -> None:
+        """A proxy's HTML error page is still a refusal the caller can name."""
+
+        async def bad_gateway(_: web.Request) -> web.Response:
+            return web.Response(status=502, text="<html>bad gateway")
+
+        async with _client(get_api_models=bad_gateway) as client:
+            with pytest.raises(CortexTTSError) as caught:
+                await client.list_models()
+        assert caught.value.code == "HTTP_ERROR"
 
     async def test_a_model_without_capability_flags_still_lists(self) -> None:
         """Only id, name, languages and downloaded decide anything here."""

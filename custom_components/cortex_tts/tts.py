@@ -17,7 +17,6 @@ from homeassistant.components.tts import (
     TextToSpeechEntity,
     TTSAudioRequest,
     TTSAudioResponse,
-    TtsAudioType,
     Voice,
 )
 from homeassistant.core import HomeAssistant
@@ -33,7 +32,6 @@ from .const import (
     CONF_TAIWAN_READINGS,
     DOMAIN,
     FIRST_AUDIO_FIELDS,
-    STREAM_BUFFERED,
     STREAM_FORMAT,
     STREAM_WHOLE,
     TEXT_FIELDS,
@@ -55,10 +53,6 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 PARALLEL_UPDATES = 0
-
-# Home Assistant asks for mp3 unless told otherwise; answering in another
-# container makes it transcode every reply through ffmpeg.
-SUPPORTED_FORMATS = ("mp3", "wav", "flac", "ogg")
 
 # Home Assistant scores a pipeline's language against this list and copies the
 # winner into the request, so advertising the regional tags is what keeps
@@ -210,17 +204,24 @@ class CortexTTSEntity(TextToSpeechEntity):
         return None
 
     def async_supports_streaming_input(self) -> bool:
-        """Return whether this model should speak before the reply is finished.
+        """Every reply goes to the app over the socket, whatever the setting.
 
-        Home Assistant's name for the hook is about *text* streaming in; what
-        it decides here is whether the reply goes to the app while it is still
-        being written, for the app to pace. The answer is this model's own
-        setting, in its own subentry, buffered until someone changes it. It
-        routes every reply, including one handed over whole: Home Assistant
-        wraps a finished message in a one-item stream when this returns true,
-        and the app then knows the whole reply before it has to send anything.
+        Home Assistant's name for the hook is about *text* streaming in, and
+        answering it `True` routes every reply through
+        `async_stream_tts_audio` — including one handed over whole, which it
+        wraps as a one-item stream. **Speaking mode** is then a question for
+        the app rather than for the route: it travels in the opening frame,
+        and `buffered` there means the app holds every byte to the end.
+
+        Saying `False` for buffered would answer a different question: it
+        would route those replies over HTTP, where the same text is cut the
+        same way and the same figures come back under other names. The one
+        thing that differed was loudness — a finished file is levelled and a
+        stream is not, about 16 dB — so the setting would have changed the
+        volume. The app levels a held reply the same way, and one route
+        carries every reply.
         """
-        return self._stream_mode() != STREAM_BUFFERED
+        return True
 
     def _stream_mode(self) -> str:
         """This model's configured mode, read fresh for every reply."""
@@ -311,9 +312,9 @@ class CortexTTSEntity(TextToSpeechEntity):
         Each switch travels only when an automation set it outright. Left
         out, the server answers from its own settings — a rule per model and
         language — and then from what it knows: normalisation on for every
-        language (the model pronounces no Arabic numeral at all), a bare
-        number read only for a model that cannot say a digit, the two
-        Chinese rewrites decided from the language.
+        language (no model here is trusted with a unit symbol or a date), a
+        bare number expanded only for a model that cannot say a digit at all,
+        the two Chinese rewrites decided from the language.
         """
         return {
             "normalize_text": _explicit(options, CONF_NORMALIZE_TEXT),
@@ -321,69 +322,6 @@ class CortexTTSEntity(TextToSpeechEntity):
             "convert_script": _explicit(options, CONF_CONVERT_SCRIPT),
             "taiwan_readings": _explicit(options, CONF_TAIWAN_READINGS),
         }
-
-    async def async_get_tts_audio(
-        self, message: str, language: str, options: dict[str, Any]
-    ) -> TtsAudioType:
-        """Synthesise a message.
-
-        Args:
-            message: Text to speak.
-            language: Language tag chosen by the pipeline.
-            options: Per-call options; ``voice`` selects a voice and the two
-                text switches allow a caller whose text is already prepared to
-                skip the conversion passes.
-
-        Returns:
-            The audio extension and bytes.
-
-        Raises:
-            HomeAssistantError: The server could not synthesise the message.
-        """
-        requested = options.get(ATTR_PREFERRED_FORMAT) or options.get(ATTR_AUDIO_OUTPUT)
-        audio_format = requested if requested in SUPPORTED_FORMATS else "wav"
-
-        self._begin_speech()
-        started = time.perf_counter()
-        try:
-            audio, stats = await self._client.speak(
-                message,
-                model=self._model.id,
-                voice=options.get(ATTR_VOICE),
-                audio_format=audio_format,
-                **self._speak_fields(language, options),
-            )
-        except CortexTTSError as err:
-            raise self._failed(err, language, "synthesis_failed") from err
-        except (aiohttp.ClientError, TimeoutError) as err:
-            raise self._failed(err, language, "cannot_connect") from err
-
-        self._push_stats(
-            SpeechStats(
-                success=True,
-                characters=len(message),
-                text=message,
-                audio_seconds=stats.get("audio_seconds", 0.0),
-                inference_ms=stats.get("inference_ms", 0.0),
-                rtf=stats.get("rtf", 0.0),
-                # Nothing can play before the one call returns, so the whole
-                # round trip is the wait. Kept comparable with the streamed
-                # path on purpose: the difference is what streaming buys.
-                first_audio_ms=(time.perf_counter() - started) * 1000,
-                language=language,
-                voice=str(options.get(ATTR_VOICE) or ""),
-                mode=STREAM_WHOLE,
-                batches=1,
-            )
-        )
-        _LOGGER.debug(
-            "spoke %d chars on %s in %.0fms (RTF %.2f)",
-            len(message),
-            self._model.id,
-            stats.get("inference_ms", 0.0),
-            stats.get("rtf", 0.0),
-        )
-        return audio_format, audio
 
     async def async_stream_tts_audio(
         self, request: TTSAudioRequest
