@@ -13,9 +13,7 @@
         "default": "mdi:broadcast",
         "state": {
           "streaming": "mdi:waveform",
-          "planned": "mdi:timer-sand",
-          "unheld": "mdi:rabbit",
-          "whole": "mdi:tray-full"
+          "buffered": "mdi:tray-full"
         }
       }
     }

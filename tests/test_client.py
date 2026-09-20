@@ -42,7 +42,7 @@ async def _client(**routes: Handler) -> AsyncIterator[CortexTTSClient]:
 
 
 async def _ok(_: web.Request) -> web.Response:
-    return web.json_response({"status": "ok", "api_version": 4})
+    return web.json_response({"status": "ok", "api_version": 5})
 
 
 class TestValidate:
@@ -97,7 +97,7 @@ class TestAuth:
 class TestApiVersion:
     """The one number a client checks before trusting any other field."""
 
-    @pytest.mark.parametrize("version", [2, 5])
+    @pytest.mark.parametrize("version", [4, 6])
     async def test_a_server_that_reports_another_version_is_refused(
         self, version: int
     ) -> None:
@@ -119,7 +119,7 @@ class TestApiVersion:
 
     async def test_the_current_version_is_accepted(self) -> None:
         async def health(_: web.Request) -> web.Response:
-            return web.json_response({"status": "ok", "api_version": 4})
+            return web.json_response({"status": "ok", "api_version": 5})
 
         async def models(_: web.Request) -> web.Response:
             return web.json_response([])

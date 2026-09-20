@@ -62,7 +62,7 @@ def _subentry(model_id: str, **data: Any) -> ConfigSubentry:
 
 
 class TestDefault:
-    """Buffered, whatever the catalog claims about the model.
+    """Auto, whatever the catalog claims about the model.
 
     Nothing in the catalog can decide this: a speed measured on one host does
     not predict another, and a model that streams comfortably where it was
@@ -70,8 +70,8 @@ class TestDefault:
     it has actually served, knows — so the client asks for `auto` and lets it.
     """
 
-    def test_it_is_buffered(self) -> None:
-        assert default_stream_mode() == STREAM_BUFFERED
+    def test_it_is_auto(self) -> None:
+        assert default_stream_mode() == STREAM_AUTO
 
     def test_it_takes_no_model(self) -> None:
         """No model goes in, because no property of a model decides it."""
@@ -108,11 +108,21 @@ class TestResolution:
 
     @pytest.mark.parametrize("legacy", sorted(LEGACY_STREAM_MODES))
     def test_the_old_streaming_words_still_mean_streaming(self, legacy: str) -> None:
-        """`sentence` and `coalesced` were how a person asked for a reply to
-        be spoken as it was written; an entry saved then must not fall back
-        to buffered because the app now makes that choice itself."""
+        """`sentence`, `coalesced`, `planned` and `unheld` were how a person
+        asked for a reply to be spoken as it was written; an entry saved then
+        must read as `auto`, which lets the app make that choice."""
         entry = _Entry(_subentry("moss-nano", **{CONF_STREAM_MODE: legacy}))
         assert stream_mode(entry, _model()) == STREAM_AUTO
+
+    def test_a_key_an_older_release_stored_has_no_say(self) -> None:
+        """`head_start` lived beside the mode once; a subentry still carrying
+        it must resolve from the mode alone."""
+        entry = _Entry(
+            _subentry(
+                "moss-nano", **{CONF_STREAM_MODE: STREAM_BUFFERED, "head_start": 2.5}
+            )
+        )
+        assert stream_mode(entry, _model()) == STREAM_BUFFERED
 
 
 class TestLookup:

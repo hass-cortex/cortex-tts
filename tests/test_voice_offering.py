@@ -1,10 +1,10 @@
 """Which voices an entity offers for a language.
 
-Filtering the list by the pipeline's language was right while every model's
-voice decided the language. Two of them now take one as a parameter, and
-declare more languages than they ship voices for — Qwen3-TTS reads ten with
-nine speakers — so on those a language with no voice of its own must not
-empty the picker of an entity that declares it speaks that language.
+Filtering the list by the pipeline's language is right where the voice decides
+the language. A model that takes one as a parameter declares more languages
+than it has voices — OmniVoice reads hundreds with nine designed voices — so
+on it a language with no voice of its own must not empty the picker of an
+entity that declares it speaks that language.
 """
 
 from __future__ import annotations

@@ -3,7 +3,8 @@
 One option — the style instruction — declared per entity rather than per
 integration: Home Assistant refuses an option an entity has not declared, so
 offering one the server would then reject moves the error away from whoever
-wrote the automation.
+wrote the automation. No catalog model reports the capability, so no entity
+offers the option; these tests pin the plumbing, on a synthetic model.
 
 The language is not an option. Home Assistant already passes one, and it means
 the language of the text, which is what the model needs to be told; a second
@@ -19,12 +20,12 @@ from custom_components.cortex_tts.models import ModelInfo
 
 def _model(**flags: bool) -> ModelInfo:
     return ModelInfo(
-        id="qwen3-tts-0.6b",
-        name="Qwen3-TTS 0.6B (built-in voices)",
-        description="Nine built-in speakers",
-        builtin_voices=True,
-        cloning=False,
-        chunk_streaming=True,
+        id="omnivoice",
+        name="OmniVoice",
+        description="Nine designed voices",
+        builtin_voices=False,
+        cloning=True,
+        chunk_streaming=False,
         languages=["zh", "en"],
         sample_rate=24000,
         downloaded=True,
@@ -67,7 +68,7 @@ class TestWhatTheServerIsSent:
     def test_both_travel_when_set(self) -> None:
         body = _speak_common(
             model="m",
-            voice="vivian",
+            voice="female-young",
             normalize_text=None,
             expand_numbers=None,
             convert_script=False,
@@ -107,8 +108,8 @@ class TestTheLanguageComesFromHomeAssistant:
     def test_the_tag_travels_whole(self) -> None:
         """Not reduced to `zh`. Which part of a tag matters is the model's to
         decide, and the server narrows it against that model's own list —
-        Qwen3-TTS names Chinese dialects, OmniVoice names Cantonese apart from
-        Chinese. Reducing it here would throw that away first."""
+        OmniVoice names Cantonese apart from Chinese. Reducing it here would
+        throw that away first."""
         entity = self._entity(language_choice=True)
         assert entity._delivery_options("zh-TW", {})["spoken_language"] == "zh-TW"
         assert entity._delivery_options("en-US", {})["spoken_language"] == "en-US"

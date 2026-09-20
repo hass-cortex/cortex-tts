@@ -87,7 +87,7 @@ class TestFraming:
         async def script(ws: web.WebSocketResponse, seen: dict) -> None:
             await _ready(ws)
             await _drain_text(ws, seen)
-            await ws.send_json({"type": "done", "mode": "planned", "batches": 1})
+            await ws.send_json({"type": "done", "mode": "buffered", "batches": 1})
 
         async with (
             _server(script) as (client, seen),
@@ -125,7 +125,7 @@ class TestFraming:
         async def script(ws: web.WebSocketResponse, seen: dict) -> None:
             await _ready(ws)
             await _drain_text(ws, seen)
-            await ws.send_json({"type": "done", "mode": "planned", "batches": 1})
+            await ws.send_json({"type": "done", "mode": "buffered", "batches": 1})
 
         async with (
             _server(script) as (client, seen),
@@ -162,7 +162,7 @@ class TestFraming:
         async def script(ws: web.WebSocketResponse, seen: dict) -> None:
             await _ready(ws)
             await _drain_text(ws, seen)
-            await ws.send_json({"type": "done", "mode": "whole", "batches": 0})
+            await ws.send_json({"type": "done", "mode": "buffered", "batches": 0})
 
         async with (
             _server(script) as (client, seen),
@@ -232,7 +232,7 @@ class TestLeaving:
         async def script(ws: web.WebSocketResponse, seen: dict) -> None:
             await _ready(ws)
             await _drain_text(ws, seen)
-            await ws.send_json({"type": "done", "mode": "planned", "batches": 1})
+            await ws.send_json({"type": "done", "mode": "buffered", "batches": 1})
             # Anything after `done` would be a cancel; give it a moment to arrive.
             with contextlib_suppress():
                 await asyncio.wait_for(ws.receive(), 0.2)

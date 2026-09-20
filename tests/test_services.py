@@ -173,9 +173,9 @@ class TestListing:
         assert (await _list_voices(_call(hass)))["voices"][0]["language"] is None
 
     async def test_a_model_with_no_voices_yet_is_not_an_error(self) -> None:
-        hass = _hass(models=[_model("hojo-80m-clone", "80M")], voices={})
-        _registry({"tts.clone": _tts_record(ENTRY_ID, "hojo-80m-clone")})
-        assert await _list_voices(_call(hass, entity_id="tts.clone")) == {
+        hass = _hass(models=[_model("moss-nano", "MOSS")], voices={})
+        _registry({"tts.moss": _tts_record(ENTRY_ID, "moss-nano")})
+        assert await _list_voices(_call(hass, entity_id="tts.moss")) == {
             "voices": [],
             "count": 0,
         }

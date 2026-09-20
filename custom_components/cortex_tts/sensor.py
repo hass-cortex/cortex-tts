@@ -85,7 +85,7 @@ DESCRIPTIONS: tuple[CortexSensorDescription, ...] = (
         suggested_display_precision=0,
         value_fn=lambda stats: _measured(stats.first_audio_ms, 1),
         # Where the wait went: loading a model that had been unloaded, the
-        # writer (a planned reply cannot render before it has finished), and
+        # writer (a buffered reply cannot render before it has finished), and
         # the render itself. Together they explain the total.
         attributes_fn=lambda stats: {
             "load_ms": round(stats.load_ms),

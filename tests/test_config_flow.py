@@ -18,9 +18,14 @@ from homeassistant.helpers.service_info.hassio import HassioServiceInfo
 
 from custom_components.cortex_tts.config_flow import (
     CortexTTSConfigFlow,
+    ModelSubentryFlow,
     normalise_host,
 )
-from custom_components.cortex_tts.const import CONF_API_KEY, CONF_HOST
+from custom_components.cortex_tts.const import (
+    CONF_API_KEY,
+    CONF_HOST,
+    CONF_STREAM_MODE,
+)
 
 HOST = "http://local-cortex-tts:8771"
 UUID = "0a1b2c3d"
@@ -152,3 +157,41 @@ class TestOneEntryPerServer:
 )
 def test_normalise_host(raw: str, expected: str) -> None:
     assert normalise_host(raw) == expected
+
+
+class _SubentryFlow(ModelSubentryFlow):
+    """The real subentry flow, with the Core methods it calls recorded."""
+
+    def __init__(self, entry: Any, subentry: Any) -> None:
+        self._entry = entry
+        self._subentry = subentry
+        self.aborted: dict[str, Any] | None = None
+
+    def _get_entry(self) -> Any:
+        return self._entry
+
+    def _get_reconfigure_subentry(self) -> Any:
+        return self._subentry
+
+    def async_update_and_abort(
+        self, entry: Any, subentry: Any, **kwargs: Any
+    ) -> dict[str, Any]:
+        self.aborted = {"entry": entry, "subentry": subentry, **kwargs}
+        return {"type": "abort"}
+
+
+class TestModelReconfigure:
+    async def test_saving_replaces_the_data_so_a_stale_key_is_dropped(self) -> None:
+        """`head_start` lived beside the mode in an older release. The form
+        is the whole of a model's settings, so saving writes `data`, not
+        `data_updates` — a merge would carry the dead key forever."""
+        subentry = MagicMock(data={CONF_STREAM_MODE: "auto", "head_start": 2.5})
+        flow = _SubentryFlow(entry := MagicMock(), subentry)
+
+        await flow.async_step_reconfigure({CONF_STREAM_MODE: "buffered"})
+
+        assert flow.aborted == {
+            "entry": entry,
+            "subentry": subentry,
+            "data": {CONF_STREAM_MODE: "buffered"},
+        }

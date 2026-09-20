@@ -82,14 +82,14 @@ class TestValueFn:
     def test_every_word_either_frame_can_send_is_an_option(self) -> None:
         """The sensor is written twice per reply, from two vocabularies.
 
-        A `batch` frame names the plan in force before any audio exists
-        (`streaming`, `planned`, `unheld` or `buffered`); `done` replaces it with what
-        happened (`whole` when the reply fit one request). A value outside
-        `options` does not mislabel the reply — Core raises, and the exception
-        comes back as a 500 from `/api/tts_proxy`, so nothing plays at all.
+        A `batch` frame names the verdict in force before any audio exists
+        (`streaming` or `buffered`); `done` repeats what happened. A value
+        outside `options` does not mislabel the reply — Core raises, and the
+        exception comes back as a 500 from `/api/tts_proxy`, so nothing plays
+        at all.
         """
-        batch_frame = {"streaming", "planned", "buffered"}
-        done_frame = {"whole", "streaming", "planned"}
+        batch_frame = {"streaming", "buffered"}
+        done_frame = {"streaming", "buffered"}
         assert batch_frame | done_frame <= set(_BY_KEY["mode"].options or ())
 
 
@@ -166,13 +166,13 @@ class TestRequests:
     """How many times the app asked the model, which the mode alone cannot say.
 
     Measured over 308 production voice replies, 70% were a single sentence.
-    Each of those is one request however the reply was planned.
+    Each of those is one request whichever way the reply was spoken.
     """
 
     def test_a_single_piece_reply_says_one(self) -> None:
-        stats = _stats(mode="planned", batches=1)
+        stats = _stats(mode="buffered", batches=1)
         assert _BY_KEY["requests"].value_fn(stats) == 1
-        assert _BY_KEY["mode"].value_fn(stats) == "planned"
+        assert _BY_KEY["mode"].value_fn(stats) == "buffered"
 
     def test_a_grouped_reply_says_how_many(self) -> None:
         assert _BY_KEY["requests"].value_fn(_stats(batches=4)) == 4

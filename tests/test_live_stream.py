@@ -189,14 +189,14 @@ class TestForwarding:
         assert words.text == "一二三。"
         assert words.characters == 4
 
-    async def test_a_planned_mode_rides_with_the_first_frame(self) -> None:
+    async def test_the_verdict_rides_with_the_first_frame(self) -> None:
         """A `batch` frame before the audio says how the reply is delivered,
         so the mode sensor need not wait for the end of a long reply."""
         sensors = _Sensors()
         session = _FakeSession(
             [
                 ("ready", {}),
-                ("batch", {"index": 1, "mode": "planned"}),
+                ("batch", {"index": 1, "mode": "buffered"}),
                 ("audio", b"\x01"),
                 ("done", DONE),
             ]
@@ -205,7 +205,7 @@ class TestForwarding:
         async for _ in entity._stream_live(_request("一二三。")):
             pass
         early = next(s for s, f in sensors.pushed if f == FIRST_AUDIO_FIELDS)
-        assert early.mode == "planned"
+        assert early.mode == "buffered"
 
     async def test_the_first_audio_is_reported_before_the_reply_ends(self) -> None:
         sensors = _Sensors()

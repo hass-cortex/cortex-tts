@@ -36,7 +36,7 @@ _LOGGER = logging.getLogger(__name__)
 # The wire shape this client was written against. The server reports its own
 # in /health; a mismatch is refused at setup rather than discovered as a
 # header that reads zero or a field that raises.
-SUPPORTED_API_VERSION = 4
+SUPPORTED_API_VERSION = 5
 
 
 class CortexTTSError(Exception):

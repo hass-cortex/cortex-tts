@@ -255,7 +255,10 @@ class ModelSubentryFlow(ConfigSubentryFlow):
         entry = self._get_entry()
         subentry = self._get_reconfigure_subentry()
         if user_input is not None:
-            return self.async_update_and_abort(entry, subentry, data_updates=user_input)
+            # The form is the whole of a model's settings, so the data is
+            # replaced rather than merged: a key an older release stored does
+            # not survive the next save.
+            return self.async_update_and_abort(entry, subentry, data=user_input)
 
         schema = vol.Schema(
             {

@@ -14,7 +14,6 @@ from .const import (
     STREAM_AUTO,
     STREAM_BUFFERED,
     STREAM_MODES,
-    STREAM_WHOLE,
     SUBENTRY_TYPE,
 )
 
@@ -105,16 +104,17 @@ class SpeechStats:
     Negative means the listener ran dry: no downstream buffer could have
     covered it, because the audio did not exist yet. Positive means it did
     not, and a stutter the listener heard came from somewhere else. A reply
-    delivered whole never had a piece that could be late, so it stays None."""
-    mode: str = STREAM_WHOLE
+    delivered buffered never had a piece that could be late, so it stays None."""
+    mode: str = STREAM_BUFFERED
     """How this reply was actually spoken — one of `SPOKEN_MODES`, as the app
-    reported it. Not the setting: a model set to `auto` is spoken whole,
-    streamed or planned per reply, and this says which it was; a reply that
-    fit one request is whole under either setting."""
+    reported it. Not the setting: a model set to `auto` is streamed or
+    buffered per reply, and this says which it was. Buffered until the app
+    says otherwise, because a reply nothing has been heard of yet has not
+    been streamed."""
     batches: int = 0
-    """How many requests the app rendered this reply in: one for a whole
-    reply, several for a live one. Which is the whole difference between the
-    spoken modes in cost, and nothing else records it."""
+    """How many requests the app rendered this reply in: one for a buffered
+    reply, several for a streamed one. Which is the whole difference between
+    the spoken modes in cost, and nothing else records it."""
 
 
 @dataclass
@@ -164,16 +164,20 @@ def model_from_unique_id(entry_id: str, unique_id: str) -> str | None:
 
 
 def default_stream_mode() -> str:
-    """How a model speaks until someone chooses for it: buffered, always.
+    """How a model speaks until someone chooses for it: auto, always.
 
     Takes no model on purpose: nothing published about a model predicts this
-    host.
+    host. The app measures its own, and `auto` lets that measurement decide.
     """
-    return STREAM_BUFFERED
+    return STREAM_AUTO
 
 
 def stream_mode_setting(stored: object) -> str:
-    """The setting a stored value stands for, legacy spellings included."""
+    """The setting a stored value stands for, legacy spellings included.
+
+    Reads one key of a subentry and nothing else, so whatever else an older
+    subentry still carries has no say here.
+    """
     if stored in STREAM_MODES:
         return str(stored)
     if stored in LEGACY_STREAM_MODES:
@@ -185,9 +189,9 @@ def stream_mode(entry: ConfigEntry, model: ModelInfo) -> str:
     """Return the mode configured for a model, or its default.
 
     Read at synthesis time rather than cached, so editing a model's subentry
-    takes effect on the next reply instead of on the next reload. A value from
-    before the app planned replies — `sentence`, `coalesced` — meant "speak it
-    as it is written", which is what `auto` means now.
+    takes effect on the next reply instead of on the next reload. A legacy
+    spelling — `sentence`, `coalesced`, `planned`, `unheld` — meant "speak it
+    as it is written", which is what `auto` asks for.
     """
     subentry = model_subentry(entry, model.id)
     if subentry is None:

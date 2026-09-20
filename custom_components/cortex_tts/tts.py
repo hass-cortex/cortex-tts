@@ -32,8 +32,8 @@ from .const import (
     CONF_TAIWAN_READINGS,
     DOMAIN,
     FIRST_AUDIO_FIELDS,
+    STREAM_BUFFERED,
     STREAM_FORMAT,
-    STREAM_WHOLE,
     TEXT_FIELDS,
 )
 from .entity import device_for
@@ -178,9 +178,10 @@ class CortexTTSEntity(TextToSpeechEntity):
         Where the model has no voice in the language, what to do depends on
         whether it can be told one. A model whose voice decides the language
         has nothing to offer, and says so. One that takes a language
-        parameter offers all of them instead: Qwen3-TTS reads ten languages
-        with nine speakers, so German names no voice of its own and is still
-        a sensible request — there the timbre and the language are separate
+        parameter offers all of them instead: OmniVoice reads ten
+        languages with nine designed voices, so German names no voice of its
+        own and is still a sensible request — there the timbre and the
+        language are separate
         things, and narrowing to nothing would leave the picker empty on a
         language the entity declares it supports.
         """
@@ -351,7 +352,7 @@ class CortexTTSEntity(TextToSpeechEntity):
         spoken: list[str] = []
         first_audio_ms = 0.0
         heard = False
-        planned: str | None = None
+        verdict: str | None = None
         done: dict[str, Any] | None = None
 
         async def forward(session: LiveSession) -> None:
@@ -384,11 +385,9 @@ class CortexTTSEntity(TextToSpeechEntity):
                 try:
                     async for kind, payload in session.frames():
                         if kind == "batch":
-                            # The plan in force, before any audio: shown at
-                            # the first frame and corrected by `done` — a
-                            # reply that turns out to fit one request is
-                            # spoken whole whatever was planned.
-                            planned = str(payload.get("mode") or "") or None
+                            # The verdict in force, before any audio: shown
+                            # at the first frame, repeated by `done`.
+                            verdict = str(payload.get("mode") or "") or None
                         elif kind == "audio":
                             if not heard:
                                 heard = True
@@ -400,12 +399,12 @@ class CortexTTSEntity(TextToSpeechEntity):
                                     SpeechStats(
                                         success=True,
                                         first_audio_ms=round(first_audio_ms, 1),
-                                        mode=planned or STREAM_WHOLE,
+                                        mode=verdict or STREAM_BUFFERED,
                                         language=request.language,
                                         voice=str(voice or ""),
                                     ),
                                     FIRST_AUDIO_FIELDS
-                                    if planned
+                                    if verdict
                                     else FIRST_AUDIO_FIELDS - {"mode"},
                                 )
                             yield payload
@@ -437,7 +436,7 @@ class CortexTTSEntity(TextToSpeechEntity):
         load_ms = float(done.get("load_ms", 0.0))
         rtf = done.get("rtf")
         margin = done.get("min_lead_s")
-        mode = str(done.get("mode", STREAM_WHOLE))
+        mode = str(done.get("mode", STREAM_BUFFERED))
         batches = int(done.get("batches", 0))
         self._push_stats(
             SpeechStats(

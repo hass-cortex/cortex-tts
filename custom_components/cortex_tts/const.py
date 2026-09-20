@@ -30,52 +30,38 @@ CONF_STREAM_MODE = "stream_mode"
 SUBENTRY_TYPE = "model"
 
 # How a reply that is still being written reaches the speaker. Either the app
-# decides per reply from what it has measured, or a person names the trade they
-# want and it stops deciding. The app publishes no figure to choose from — it
-# measures its own host — so what is picked here is the trade, not a number.
+# decides per reply from the real-time factor it has measured for this model
+# and voice on its own host, or a person insists on one outcome and it stops
+# deciding. The app publishes no figure to choose from — it measures its own
+# host — so what is picked here is the trade, not a number.
 STREAM_AUTO = "auto"
-"""Let the app pace the reply, streamed or planned, from what it measured."""
-STREAM_PLANNED = "planned"
-"""Wait for the words, then cut so playback never catches the renderer. Never
-stalls; on a model slower than its own audio the first word can be minutes."""
-STREAM_UNHELD = "unheld"
-"""The same words cut for the soonest first word, released with no hold at
-all. Stalls on a model that cannot keep ahead — that is the trade."""
-STREAM_BUFFERED = "buffered"
-"""Render the whole reply, then play it. No stall, the longest wait, and the
-only way to get a reply the model never had to cut."""
-STREAM_MODES = (STREAM_AUTO, STREAM_PLANNED, STREAM_UNHELD, STREAM_BUFFERED)
-
-# The two words the setting used to have for streaming. A stored value from
-# then means the person wanted the reply spoken as it was written, which is
-# now `auto`; reading it as anything else would silently turn streaming off.
-LEGACY_STREAM_MODES = frozenset({"sentence", "coalesced"})
-
-# What the app reports a reply was actually spoken as, in its `done` frame.
-# Three of them are settings too — naming one is asking for that outcome — and
-# the two here are outcomes only: `streaming` is something `auto` arrives at,
-# and `whole` is any plan that turned out to fit a single request.
-STREAM_WHOLE = "whole"
+"""Let the app decide per reply: streamed when the measured real-time factor
+says the model keeps ahead of its audio, buffered when it does not or when
+it has not been measured yet. Never runs dry."""
 STREAM_STREAMING = "streaming"
-SPOKEN_MODES = (
-    STREAM_WHOLE,
-    STREAM_STREAMING,
-    STREAM_PLANNED,
-    STREAM_UNHELD,
-    STREAM_BUFFERED,
-)
-"""How a reply is being spoken, as the app reports it. Not the setting — that
-is `STREAM_MODES`.
+"""Insist on streaming: speak the reply as it is written, whatever the app
+measured. On a host that cannot keep ahead of its audio, playback stalls
+between requests — that is the trade."""
+STREAM_BUFFERED = "buffered"
+"""Insist on buffering: render the whole reply, then play it. Never stalls,
+the longest wait before the first word."""
+STREAM_MODES = (STREAM_AUTO, STREAM_STREAMING, STREAM_BUFFERED)
+
+# Values earlier settings could hold. Each of them meant "let the reply be
+# spoken as it is written", which is what `auto` asks for; reading one as
+# anything else would silently turn streaming off.
+LEGACY_STREAM_MODES = frozenset({"sentence", "coalesced", "planned", "unheld"})
+
+SPOKEN_MODES = (STREAM_STREAMING, STREAM_BUFFERED)
+"""How a reply is being spoken, as the app reports it: the two outcomes,
+never `auto`, which is a setting that names no outcome.
 
 Every value either frame can carry, because the sensor is written from both:
-a `batch` frame names the plan in force (`streaming`, `planned`, `unheld` or `buffered`)
-before any audio exists, and `done` corrects it afterwards with what actually
-happened (`whole` when the reply fit one request, however it was planned —
-except `buffered`, which is about releasing rather than cutting and so says
-so whatever the count).
-Omitting one is not a wrong label but a failed reply: an enum sensor handed a
-state outside its options raises, and the exception surfaces as a 500 from
-`/api/tts_proxy`, so nothing plays at all."""
+a `batch` frame names the verdict in force before any audio exists, and
+`done` repeats what actually happened. Omitting one is not a wrong label but
+a failed reply: an enum sensor handed a state outside its options raises, and
+the exception surfaces as a 500 from `/api/tts_proxy`, so nothing plays at
+all."""
 
 # Sensor keys a mid-stream push may write. These two are settled the moment the
 # first frame leaves — everything else is a total that is not true until the
