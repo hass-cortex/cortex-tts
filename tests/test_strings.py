@@ -57,19 +57,14 @@ class TestSubentryFlow:
         assert reasons
         assert reasons <= set(STRINGS["config_subentries"]["model"]["abort"])
 
-    def test_the_reason_core_supplies_for_a_saved_form_has_one_too(self) -> None:
-        """`async_update_and_abort` aborts with a reason the flow never names.
-
-        Core defaults it to `reconfigure_successful`, so nothing in this file
-        mentions it and the dialog rendered the raw key — reported from the UI
-        as the words "reconfigure_successful" on a successful save.
-        """
+    def test_a_saved_form_names_its_own_reason(self) -> None:
+        """Core's update-and-abort helpers word a reason-less save centrally
+        (2026.10+), so the flow names `reconfigure_successful` itself — which
+        puts it under the check above."""
         source = (ROOT / "config_flow.py").read_text(encoding="utf-8")
         start = source.index("class ModelSubentryFlow")
-        assert "async_update_and_abort" in source[start:]
-        assert (
-            "reconfigure_successful" in STRINGS["config_subentries"]["model"]["abort"]
-        )
+        assert 'reason="reconfigure_successful"' in source[start:]
+        assert "async_update_and_abort(" not in source[start:]
 
     def test_the_step_the_flow_shows_is_the_step_that_is_translated(self) -> None:
         assert hasattr(ModelSubentryFlow, "async_step_reconfigure")

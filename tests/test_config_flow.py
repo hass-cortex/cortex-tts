@@ -165,7 +165,7 @@ class _SubentryFlow(ModelSubentryFlow):
     def __init__(self, entry: Any, subentry: Any) -> None:
         self._entry = entry
         self._subentry = subentry
-        self.aborted: dict[str, Any] | None = None
+        self.hass = MagicMock()
 
     def _get_entry(self) -> Any:
         return self._entry
@@ -173,11 +173,8 @@ class _SubentryFlow(ModelSubentryFlow):
     def _get_reconfigure_subentry(self) -> Any:
         return self._subentry
 
-    def async_update_and_abort(
-        self, entry: Any, subentry: Any, **kwargs: Any
-    ) -> dict[str, Any]:
-        self.aborted = {"entry": entry, "subentry": subentry, **kwargs}
-        return {"type": "abort"}
+    def async_abort(self, **kwargs: Any) -> dict[str, Any]:
+        return {"type": "abort", **kwargs}
 
 
 class TestModelReconfigure:
@@ -190,8 +187,15 @@ class TestModelReconfigure:
 
         await flow.async_step_reconfigure({CONF_STREAM_MODE: "buffered"})
 
-        assert flow.aborted == {
-            "entry": entry,
-            "subentry": subentry,
-            "data": {CONF_STREAM_MODE: "buffered"},
-        }
+        flow.hass.config_entries.async_update_subentry.assert_called_once_with(
+            entry, subentry, data={CONF_STREAM_MODE: "buffered"}
+        )
+
+    async def test_saving_aborts_with_the_integrations_own_wording(self) -> None:
+        """No `translation_domain`: Core 2026.10 would otherwise render its
+        central "reconfigure_successful" string instead of ours."""
+        flow = _SubentryFlow(MagicMock(), MagicMock(data={}))
+
+        result = await flow.async_step_reconfigure({CONF_STREAM_MODE: "auto"})
+
+        assert result == {"type": "abort", "reason": "reconfigure_successful"}
