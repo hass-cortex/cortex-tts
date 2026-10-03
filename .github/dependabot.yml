@@ -4,21 +4,17 @@ updates:
   - package-ecosystem: "uv"
     directory: "/"
     schedule:
-      interval: "monthly"
+      interval: "quarterly"
     open-pull-requests-limit: 5
     labels: ["dependencies", "python"]
     # Wait before opening a PR — avoid 0-day regressions.
     cooldown:
       default-days: 7
       semver-major-days: 30
-    groups:
-      dev-deps:
-        patterns: ["*"]
-        exclude-patterns: ["pytest*", "voluptuous", "sentence-stream"]
-        update-types: ["minor", "patch"]
-      test-deps:
-        patterns: ["pytest*", "voluptuous"]
-        update-types: ["minor", "patch"]
+    # Major bumps only; minor and patch releases are not worth a PR.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-minor", "version-update:semver-patch"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
