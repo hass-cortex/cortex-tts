@@ -1,5 +1,8 @@
 # Contributing
 
+A problem with the voice itself, the text pipeline or the models usually
+belongs to [the app](https://github.com/hass-cortex/app-cortex-tts).
+
 ## Setup
 
 ```bash

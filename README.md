@@ -190,16 +190,6 @@ and what to do when the margin goes negative are in [Keeping up][streaming].
 - **"This app version speaks a different API".** Update whichever of the app
   and the integration is older.
 
-## Contributing
-
-Issues and pull requests are welcome; [CONTRIBUTING.md](CONTRIBUTING.md) has
-the checks to run. A problem with the voice itself, the text pipeline or the
-models usually belongs to [the app][app-repo].
-
-## License
-
-MIT — see [LICENSE](LICENSE).
-
 [app-repo]: https://github.com/hass-cortex/app-cortex-tts
 [app-docs]: https://github.com/hass-cortex/app-cortex-tts/blob/main/cortex-tts/DOCS.md
 [models]: https://github.com/hass-cortex/app-cortex-tts/blob/main/cortex-tts/docs/models.md
