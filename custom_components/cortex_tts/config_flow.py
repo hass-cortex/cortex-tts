@@ -145,7 +145,13 @@ class CortexTTSConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
         rotated key updates the stored credentials in place, so rotating the
         key in the addon's options never means a manual reauth.
         """
-        _LOGGER.debug("Supervisor discovery: %s", discovery_info)
+        # The payload carries the api_key; log only the non-secret fields.
+        _LOGGER.debug(
+            "Supervisor discovery: %s (slug=%s, uuid=%s)",
+            discovery_info.name,
+            discovery_info.slug,
+            discovery_info.uuid,
+        )
 
         host = f"http://{discovery_info.config['host']}:{discovery_info.config['port']}"
         api_key = discovery_info.config["api_key"]

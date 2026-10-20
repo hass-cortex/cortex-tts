@@ -10,6 +10,7 @@ visible as a second round of model loads in the app log.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -89,6 +90,18 @@ async def test_the_entry_is_still_updated_and_adopted() -> None:
     assert flow.aborted["entry"] is entry
     assert flow.aborted["data_updates"] == {CONF_HOST: HOST, CONF_API_KEY: "rotated"}
     assert flow.aborted["unique_id"] == UUID
+
+
+async def test_discovery_logging_never_includes_the_api_key(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A debug log posted for support must not leak a working key."""
+    caplog.set_level(logging.DEBUG, logger="custom_components.cortex_tts")
+    flow = _Flow([_Entry(**{CONF_HOST: HOST, CONF_API_KEY: "old-key"})])
+
+    await flow.async_step_hassio(_discovery(api_key="s3cret-key"))
+
+    assert "s3cret-key" not in caplog.text
 
 
 class _AbortError(Exception):
