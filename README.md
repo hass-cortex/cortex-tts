@@ -26,8 +26,8 @@ costs, how each clones, which to pick — are documented on the app's side in
 ## Installation
 
 Install the app and download a model first; the [App Store page][app-docs]
-has the steps. Then add this integration through HACS and restart Home
-Assistant.
+has the steps. Then add this integration through the Marketplace and restart
+Home Assistant.
 
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=hass-cortex&repository=cortex-tts&category=integration)
 
