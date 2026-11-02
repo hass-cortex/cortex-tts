@@ -1,7 +1,7 @@
 # Cortex TTS for Home Assistant
 
 [![GitHub Release](https://img.shields.io/github/v/release/hass-cortex/cortex-tts)](https://github.com/hass-cortex/cortex-tts/releases)
-[![HACS](https://img.shields.io/badge/HACS-Custom-blue.svg)](https://hacs.xyz/)
+[![HACS](https://img.shields.io/badge/HACS-Default-41BDF5.svg)](https://hacs.xyz/)
 [![HA Version](https://img.shields.io/badge/HA-2026.3.0+-green.svg)](https://www.home-assistant.io/)
 [![GitHub License](https://img.shields.io/github/license/hass-cortex/cortex-tts)](https://github.com/hass-cortex/cortex-tts/blob/main/LICENSE)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/hass-cortex/cortex-tts)
@@ -26,10 +26,11 @@ costs, how each clones, which to pick — are documented on the app's side in
 ## Installation
 
 Install the app and download a model first; the [App Store page][app-docs]
-has the steps. Then add this integration through the Marketplace and restart
-Home Assistant.
+has the steps. Then install this integration.
 
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=hass-cortex&repository=cortex-tts&category=integration)
+
+Click the button above, or manually: **Settings > Marketplace** > search "Cortex TTS" > **Install** > restart HA.
 
 On Home Assistant OS and Supervised the app announces itself, so a **Cortex
 TTS discovered** card appears under **Settings → Devices & services**; click
