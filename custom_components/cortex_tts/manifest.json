@@ -1,6 +1,7 @@
 {
   "domain": "cortex_tts",
   "name": "Cortex TTS",
+  "categories": ["ai_voice.speech"],
   "codeowners": [
     "@parkghost"
   ],
