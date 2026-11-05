@@ -7,7 +7,11 @@ belongs to [the app](https://github.com/hass-cortex/app-cortex-tts).
 
 ```bash
 uv sync --group dev --group test
+uv run pre-commit install --hook-type pre-commit --hook-type commit-msg --hook-type pre-push
 ```
+
+The hooks run ruff and hassfest (Docker) on commit, check the commit message,
+and run `uv lock --check`, pyright and the tests on push.
 
 ## Before opening a pull request
 
