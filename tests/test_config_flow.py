@@ -186,9 +186,6 @@ class _SubentryFlow(ModelSubentryFlow):
     def _get_reconfigure_subentry(self) -> Any:
         return self._subentry
 
-    def async_abort(self, **kwargs: Any) -> dict[str, Any]:
-        return {"type": "abort", **kwargs}
-
 
 class TestModelReconfigure:
     async def test_saving_replaces_the_data_so_a_stale_key_is_dropped(self) -> None:
@@ -205,8 +202,8 @@ class TestModelReconfigure:
         )
 
     async def test_saving_aborts_with_the_integrations_own_wording(self) -> None:
-        """No `translation_domain`: Core 2026.10 would otherwise render its
-        central "reconfigure_successful" string instead of ours."""
+        """Without its own reason Core renders the central
+        "reconfigure_successful" string instead of ours."""
         flow = _SubentryFlow(MagicMock(), MagicMock(data={}))
 
         result = await flow.async_step_reconfigure({CONF_STREAM_MODE: "auto"})

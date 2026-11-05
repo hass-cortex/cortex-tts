@@ -93,6 +93,7 @@ _module(
     "homeassistant.exceptions",
     HomeAssistantError=_HomeAssistantError,
     ConfigEntryAuthFailed=type("ConfigEntryAuthFailed", (_HomeAssistantError,), {}),
+    ConfigEntryError=type("ConfigEntryError", (_HomeAssistantError,), {}),
     ConfigEntryNotReady=type("ConfigEntryNotReady", (_HomeAssistantError,), {}),
     ServiceValidationError=type("ServiceValidationError", (_HomeAssistantError,), {}),
 )
@@ -139,6 +140,31 @@ class _ConfigSubentry:
     subentry_id: str = field(default_factory=lambda: uuid4().hex)
 
 
+class _ConfigSubentryFlow:
+    """Core's subentry flow helpers, as far as the integration uses them."""
+
+    hass: Any
+
+    def async_abort(
+        self, *, reason: str, translation_domain: str | None = None
+    ) -> dict[str, Any]:
+        result: dict[str, Any] = {"type": "abort", "reason": reason}
+        if translation_domain is not None:
+            result["translation_domain"] = translation_domain
+        return result
+
+    def async_update_and_abort(
+        self, entry: Any, subentry: Any, *, reason: str | None = None, **changes: Any
+    ) -> dict[str, Any]:
+        """Like Core: a reason-less abort is worded by the central domain."""
+        self.hass.config_entries.async_update_subentry(entry, subentry, **changes)
+        if reason is None:
+            return self.async_abort(
+                reason="reconfigure_successful", translation_domain="homeassistant"
+            )
+        return self.async_abort(reason=reason)
+
+
 class _ConfigEntryState(StrEnum):
     """Only the member the services module compares against."""
 
@@ -155,7 +181,7 @@ _module(
     ),
     ConfigFlowResult=dict,
     ConfigSubentry=_ConfigSubentry,
-    ConfigSubentryFlow=type("ConfigSubentryFlow", (), {}),
+    ConfigSubentryFlow=_ConfigSubentryFlow,
     SubentryFlowResult=dict,
     ConfigEntryNotReady=sys.modules["homeassistant.exceptions"].ConfigEntryNotReady,
 )
@@ -201,6 +227,7 @@ _module(
     DeviceEntryType=_DeviceEntryType,
     DeviceInfo=dict,
     async_get=MagicMock(),
+    async_entries_for_config_entry=lambda registry, entry_id: [],
 )
 _module(
     "homeassistant.helpers.selector",

@@ -263,13 +263,11 @@ class ModelSubentryFlow(ConfigSubentryFlow):
         if user_input is not None:
             # The form is the whole of a model's settings, so the data is
             # replaced rather than merged: a key an older release stored does
-            # not survive the next save.
-            self.hass.config_entries.async_update_subentry(
-                entry, subentry, data=user_input
+            # not survive the next save. The explicit reason keeps our wording
+            # over Core's central "reconfigure_successful" string.
+            return self.async_update_and_abort(
+                entry, subentry, data=user_input, reason="reconfigure_successful"
             )
-            # Not async_update_and_abort: since 2026.10 it words the abort
-            # centrally, and before 2026.10 it accepts no reason to keep ours.
-            return self.async_abort(reason="reconfigure_successful")
 
         schema = vol.Schema(
             {

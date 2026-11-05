@@ -2,7 +2,7 @@
 
 [![GitHub Release](https://img.shields.io/github/v/release/hass-cortex/cortex-tts)](https://github.com/hass-cortex/cortex-tts/releases)
 [![HACS](https://img.shields.io/badge/HACS-Default-41BDF5.svg)](https://hacs.xyz/)
-[![HA Version](https://img.shields.io/badge/HA-2026.3.0+-green.svg)](https://www.home-assistant.io/)
+[![HA Version](https://img.shields.io/badge/HA-2026.11.0+-green.svg)](https://www.home-assistant.io/)
 [![GitHub License](https://img.shields.io/github/license/hass-cortex/cortex-tts)](https://github.com/hass-cortex/cortex-tts/blob/main/LICENSE)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/hass-cortex/cortex-tts)
 
@@ -15,9 +15,9 @@ costs, how each clones, which to pick — are documented on the app's side in
 
 ## Requirements
 
-- **Home Assistant 2026.3.0 or newer** — the release that serves an
-  integration's own `brand/` icons, and that brings the Python 3.14 the code
-  is written for.
+- **Home Assistant 2026.11.0 or newer** — the release whose config entries
+  report success by returning nothing and failure by raising, the contract
+  the integration's setup and unload are written to.
 - **A Cortex TTS app speaking API version 5.** Not a release number: the
   integration reads `api_version` from the app's `/health` and sets up only
   against that exact version, refusing anything else with "unsupported API".
